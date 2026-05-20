@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { Check, Calendar, MapPin, Clock, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -162,7 +162,9 @@ function Index() {
             <Sparkles className="h-5 w-5 text-primary" />
             <span>SCALE & PROFIT</span>
           </div>
-          <Button>Sign up Now!</Button>
+          <Button asChild>
+            <Link to="/checkout" search={{ city: "boston", tier: "ga" }}>Sign up Now!</Link>
+          </Button>
         </div>
       </header>
 
@@ -186,8 +188,8 @@ function Index() {
           <p className="mx-auto mt-6 max-w-2xl text-lg text-muted-foreground md:text-xl">
             Get the blueprint for More Profit, Better Teams, and Real Freedom.
           </p>
-          <Button size="lg" className="mt-8 px-10 py-6 text-base">
-            Sign up Today!
+          <Button asChild size="lg" className="mt-8 px-10 py-6 text-base">
+            <Link to="/checkout" search={{ city: "boston", tier: "ga" }}>Sign up Today!</Link>
           </Button>
         </div>
       </section>
@@ -225,8 +227,8 @@ function Index() {
             Stop trying to navigate scaling your agency alone.{" "}
             <span className="text-primary">There's a smarter way.</span>
           </p>
-          <Button size="lg" className="mt-6">
-            Get Your Ticket!
+          <Button asChild size="lg" className="mt-6">
+            <Link to="/checkout" search={{ city: "boston", tier: "ga" }}>Get Your Ticket!</Link>
           </Button>
         </div>
       </Section>
@@ -301,7 +303,9 @@ function Index() {
           execution, and real-world experience in building profitable, scalable agencies.
         </p>
         <div className="mt-8 text-center">
-          <Button size="lg">Sign Me Up!</Button>
+          <Button asChild size="lg">
+            <Link to="/checkout" search={{ city: "boston", tier: "ga" }}>Sign Me Up!</Link>
+          </Button>
         </div>
       </Section>
 
@@ -443,7 +447,17 @@ function Index() {
                           </li>
                         ))}
                       </ul>
-                      <Button className="mt-6 w-full">Sign Up Now!</Button>
+                      <Button asChild className="mt-6 w-full">
+                        <Link
+                          to="/checkout"
+                          search={{
+                            city: e.city.toLowerCase(),
+                            tier: tier.featured ? "vip" : "ga",
+                          }}
+                        >
+                          Sign Up Now!
+                        </Link>
+                      </Button>
                     </Card>
                   ))}
                 </div>
@@ -482,7 +496,9 @@ function Index() {
           ))}
         </div>
         <div className="mt-12 text-center">
-          <Button size="lg">Get Your Ticket</Button>
+          <Button asChild size="lg">
+            <Link to="/checkout" search={{ city: "boston", tier: "ga" }}>Get Your Ticket</Link>
+          </Button>
         </div>
       </Section>
 
@@ -502,8 +518,8 @@ function Index() {
             where we share the exact frameworks, strategies, and tools we've used to build
             multiple high-performing agencies.
           </p>
-          <Button size="lg" className="mt-8">
-            Reserve Your Seat
+          <Button asChild size="lg" className="mt-8">
+            <Link to="/checkout" search={{ city: "boston", tier: "ga" }}>Reserve Your Seat</Link>
           </Button>
         </div>
       </Section>
