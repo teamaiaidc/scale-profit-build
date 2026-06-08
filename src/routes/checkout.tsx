@@ -13,13 +13,15 @@ import {
 } from "@/lib/ghl.functions";
 
 
-type Search = { city?: string; tier?: string };
+type Search = { city?: string; tier?: string; email?: string };
 
 export const Route = createFileRoute("/checkout")({
   validateSearch: (s: Record<string, unknown>): Search => ({
     city: typeof s.city === "string" ? s.city : "boston",
     tier: typeof s.tier === "string" ? s.tier : "ga",
+    email: typeof s.email === "string" ? s.email : undefined,
   }),
+
   head: () => ({
     meta: [
       { title: "Checkout — Scale & Profit Seminar" },
