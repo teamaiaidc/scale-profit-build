@@ -133,8 +133,93 @@ function CheckoutPage() {
   };
 
   const submitToGhl = useServerFn(submitCheckoutToGhl);
+  const lookupGhl = useServerFn(lookupGhlContactByEmail);
+  const pushGhl = useServerFn(pushGhlContactUpdate);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  // ===== GHL 2-way sync =====
+  type FieldDef = { id: string; name: string; fieldKey?: string; dataType?: string };
+  const [ghlContactId, setGhlContactId] = useState<string | null>(null);
+  const [fieldDefs, setFieldDefs] = useState<FieldDef[]>([]);
+  const [customValues, setCustomValues] = useState<Record<string, string>>({});
+  const [syncStatus, setSyncStatus] = useState<"idle" | "syncing" | "synced" | "error">("idle");
+  const [syncError, setSyncError] = useState<string | null>(null);
+
+  const lookupTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const runLookup = useCallback(
+    async (email: string) => {
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return;
+      setSyncStatus("syncing");
+      setSyncError(null);
+      try {
+        const res = await lookupGhl({ data: { email } });
+        setFieldDefs(res.fieldDefs ?? []);
+        if (res.contact) {
+          setGhlContactId(res.contact.id);
+          setYourInfo((prev) => ({
+            ...prev,
+            firstName: prev.firstName || res.contact!.firstName || "",
+            lastName: prev.lastName || res.contact!.lastName || "",
+            phone: prev.phone || res.contact!.phone || "",
+          }));
+          const map: Record<string, string> = {};
+          for (const f of res.contact.customFields) map[f.id] = f.value;
+          setCustomValues(map);
+        } else {
+          setGhlContactId(null);
+        }
+        setSyncStatus("synced");
+      } catch (err) {
+        setSyncStatus("error");
+        setSyncError(err instanceof Error ? err.message : "Sync failed");
+      }
+    },
+    [lookupGhl],
+  );
+
+  // Debounced lookup on email change
+  useEffect(() => {
+    if (lookupTimer.current) clearTimeout(lookupTimer.current);
+    if (!yourInfo.email) return;
+    lookupTimer.current = setTimeout(() => runLookup(yourInfo.email), 600);
+    return () => {
+      if (lookupTimer.current) clearTimeout(lookupTimer.current);
+    };
+  }, [yourInfo.email, runLookup]);
+
+  // Pre-fetch if email is in URL
+  useEffect(() => {
+    if (emailFromUrl) runLookup(emailFromUrl);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const schedulePush = useCallback(
+    (payload: {
+      firstName?: string;
+      lastName?: string;
+      phone?: string;
+      customFields?: Array<{ id: string; value: string }>;
+    }) => {
+      if (!ghlContactId) return;
+      if (pushTimer.current) clearTimeout(pushTimer.current);
+      pushTimer.current = setTimeout(async () => {
+        setSyncStatus("syncing");
+        try {
+          await pushGhl({ data: { contactId: ghlContactId, ...payload } });
+          setSyncStatus("synced");
+        } catch (err) {
+          setSyncStatus("error");
+          setSyncError(err instanceof Error ? err.message : "Push failed");
+        }
+      }, 800);
+    },
+    [ghlContactId, pushGhl],
+  );
+
+
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
