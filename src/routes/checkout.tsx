@@ -372,6 +372,7 @@ function CheckoutPage() {
                           onChange={(e) =>
                             setYourInfo({ ...yourInfo, firstName: e.target.value })
                           }
+                          onBlur={(e) => schedulePush({ firstName: e.target.value })}
                         />
                       </Field>
                       <Field label="Last name">
@@ -381,16 +382,33 @@ function CheckoutPage() {
                           onChange={(e) =>
                             setYourInfo({ ...yourInfo, lastName: e.target.value })
                           }
+                          onBlur={(e) => schedulePush({ lastName: e.target.value })}
                         />
                       </Field>
                     </div>
                     <Field label="Email">
-                      <Input
-                        type="email"
-                        required
-                        value={yourInfo.email}
-                        onChange={(e) => setYourInfo({ ...yourInfo, email: e.target.value })}
-                      />
+                      <div className="flex gap-2">
+                        <Input
+                          type="email"
+                          required
+                          value={yourInfo.email}
+                          onChange={(e) => setYourInfo({ ...yourInfo, email: e.target.value })}
+                          onBlur={(e) => runLookup(e.target.value)}
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          onClick={() => runLookup(yourInfo.email)}
+                          disabled={!yourInfo.email || syncStatus === "syncing"}
+                          title="Sync from GHL"
+                        >
+                          <RefreshCw
+                            className={`h-4 w-4 ${syncStatus === "syncing" ? "animate-spin" : ""}`}
+                          />
+                        </Button>
+                      </div>
+                      <SyncIndicator status={syncStatus} error={syncError} hasContact={!!ghlContactId} />
                     </Field>
                     <Field label="Phone">
                       <div className="flex gap-2">
@@ -411,9 +429,38 @@ function CheckoutPage() {
                           required
                           value={yourInfo.phone}
                           onChange={(e) => setYourInfo({ ...yourInfo, phone: e.target.value })}
+                          onBlur={(e) =>
+                            schedulePush({
+                              phone: `${yourInfo.countryCode.replace(/[^+\d]/g, "")}${e.target.value}`,
+                            })
+                          }
                         />
                       </div>
                     </Field>
+
+                    {ghlContactId && fieldDefs.length > 0 && (
+                      <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-4">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          GHL Custom Fields (synced)
+                        </p>
+                        {fieldDefs.map((def) => (
+                          <Field key={def.id} label={def.name}>
+                            <Input
+                              value={customValues[def.id] ?? ""}
+                              onChange={(e) =>
+                                setCustomValues((prev) => ({ ...prev, [def.id]: e.target.value }))
+                              }
+                              onBlur={(e) =>
+                                schedulePush({
+                                  customFields: [{ id: def.id, value: e.target.value }],
+                                })
+                              }
+                            />
+                          </Field>
+                        ))}
+                      </div>
+                    )}
+
                     <Button type="button" className="w-full" onClick={() => setStep(2)}>
                       Go To Step #2
                     </Button>
