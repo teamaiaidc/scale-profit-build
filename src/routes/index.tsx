@@ -1,10 +1,11 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Check, Calendar, MapPin, Clock, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { listEvents } from "@/lib/events.functions";
 import { getTodayISO, splitEvents } from "@/lib/events";
+import { loadStoredEvents } from "@/lib/events.store";
 import logo from "@/assets/hero-banner.webp";
 import davidImg from "@/assets/david-peterson.webp";
 import alexImg from "@/assets/alex-shattuck.webp";
@@ -147,8 +148,13 @@ function Section({
 }
 
 function Index() {
-  const { events: allEvents } = Route.useLoaderData();
+  const { events: loaderEvents } = Route.useLoaderData();
+  const [allEvents, setAllEvents] = useState(loaderEvents);
   const [openEvent, setOpenEvent] = useState<number | null>(0);
+  // Pick up this browser's admin edits (localStorage) after hydration.
+  useEffect(() => {
+    setAllEvents(loadStoredEvents(loaderEvents));
+  }, [loaderEvents]);
   // Show only upcoming events (soonest first); fall back to all if none are upcoming.
   const { upcoming } = splitEvents(allEvents, getTodayISO());
   const events = upcoming.length > 0 ? upcoming : allEvents;

@@ -49,6 +49,21 @@ export const DEFAULT_EVENTS: EventRow[] = [
   },
 ];
 
+// Fill in any missing fields so partial/legacy records stay valid.
+export function normalizeEvent(e: Partial<EventRow>): EventRow {
+  return {
+    slug: e.slug ?? "",
+    city: e.city ?? "",
+    date: e.date ?? "",
+    end_date: e.end_date ?? "",
+    venue: e.venue ?? "",
+    address: e.address ?? "",
+    time: e.time ?? "9:00 AM – 4:00 PM",
+    details: e.details ?? "",
+    sort_order: e.sort_order ?? 0,
+  };
+}
+
 // Local date as YYYY-MM-DD, for comparing against an event's end_date.
 export function getTodayISO(now: Date = new Date()): string {
   const y = now.getFullYear();

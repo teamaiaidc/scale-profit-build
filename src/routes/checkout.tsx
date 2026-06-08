@@ -12,6 +12,7 @@ import {
   submitCheckoutToGhl,
 } from "@/lib/ghl.functions";
 import { listEvents } from "@/lib/events.functions";
+import { loadStoredEvents } from "@/lib/events.store";
 
 
 type Search = { city?: string; tier?: string; email?: string };
@@ -84,7 +85,12 @@ type Attendee = { firstName: string; lastName: string; email: string };
 
 function CheckoutPage() {
   const { city, tier, email: emailFromUrl } = Route.useSearch();
-  const { events } = Route.useLoaderData();
+  const { events: loaderEvents } = Route.useLoaderData();
+  const [events, setEvents] = useState(loaderEvents);
+  // Pick up this browser's admin edits (localStorage) after hydration.
+  useEffect(() => {
+    setEvents(loadStoredEvents(loaderEvents));
+  }, [loaderEvents]);
   const navigate = useNavigate();
   // Build the city map from live event data, falling back to the hardcoded defaults.
   const cities = useMemo(() => {

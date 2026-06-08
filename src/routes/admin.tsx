@@ -1,19 +1,14 @@
-import { createFileRoute, useRouter } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Lock, Save, Check, Loader2, Plus, Trash2, CalendarClock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  listEvents,
-  verifyAdminPassword,
-  updateEvent,
-  createEvent,
-  deleteEvent,
-} from "@/lib/events.functions";
+import { listEvents, verifyAdminPassword } from "@/lib/events.functions";
 import { getTodayISO, splitEvents, type EventRow } from "@/lib/events";
+import { loadStoredEvents, saveStoredEvents } from "@/lib/events.store";
 
 export const Route = createFileRoute("/admin")({
   head: () => ({
@@ -26,7 +21,7 @@ export const Route = createFileRoute("/admin")({
   component: AdminPage,
 });
 
-type SaveState = "idle" | "saving" | "saved" | "error";
+type SaveState = "idle" | "saved";
 
 const EMPTY_EVENT: EventRow = {
   slug: "",
@@ -115,11 +110,7 @@ function EventFields({
 
 function AdminPage() {
   const { events: initialEvents } = Route.useLoaderData();
-  const router = useRouter();
   const verifyFn = useServerFn(verifyAdminPassword);
-  const updateFn = useServerFn(updateEvent);
-  const createFn = useServerFn(createEvent);
-  const deleteFn = useServerFn(deleteEvent);
 
   const [password, setPassword] = useState("");
   const [unlocked, setUnlocked] = useState(false);
@@ -128,11 +119,15 @@ function AdminPage() {
 
   const [events, setEvents] = useState<EventRow[]>(initialEvents);
   const [saveState, setSaveState] = useState<Record<string, SaveState>>({});
-  const [rowError, setRowError] = useState<Record<string, string>>({});
 
   const [newEvent, setNewEvent] = useState<EventRow>(EMPTY_EVENT);
   const [addState, setAddState] = useState<SaveState>("idle");
   const [addError, setAddError] = useState("");
+
+  // Hydrate from this browser's saved edits once mounted.
+  useEffect(() => {
+    setEvents(loadStoredEvents(initialEvents));
+  }, [initialEvents]);
 
   const today = getTodayISO();
   const { upcoming, past } = splitEvents(events, today);
@@ -151,6 +146,11 @@ function AdminPage() {
     }
   }
 
+  function persist(next: EventRow[]) {
+    setEvents(next);
+    saveStoredEvents(next);
+  }
+
   function editField(slug: string, key: keyof EventRow, value: string) {
     setEvents((prev) =>
       prev.map((ev) => (ev.slug === slug ? { ...ev, [key]: value } : ev)),
@@ -158,72 +158,34 @@ function AdminPage() {
     setSaveState((s) => ({ ...s, [slug]: "idle" }));
   }
 
-  async function save(ev: EventRow) {
-    setSaveState((s) => ({ ...s, [ev.slug]: "saving" }));
-    setRowError((r) => ({ ...r, [ev.slug]: "" }));
-    try {
-      await updateFn({
-        data: {
-          password,
-          slug: ev.slug,
-          city: ev.city,
-          date: ev.date,
-          end_date: ev.end_date,
-          venue: ev.venue,
-          address: ev.address,
-          time: ev.time,
-          details: ev.details,
-        },
-      });
-      await router.invalidate();
-      setSaveState((s) => ({ ...s, [ev.slug]: "saved" }));
-    } catch (err) {
-      setSaveState((s) => ({ ...s, [ev.slug]: "error" }));
-      setRowError((r) => ({
-        ...r,
-        [ev.slug]: err instanceof Error ? err.message : "Failed to save.",
-      }));
-    }
+  function save(ev: EventRow) {
+    saveStoredEvents(events);
+    setSaveState((s) => ({ ...s, [ev.slug]: "saved" }));
   }
 
-  async function addEvent() {
-    setAddState("saving");
+  function addEvent() {
     setAddError("");
-    try {
-      await createFn({
-        data: {
-          password,
-          slug: newEvent.slug.trim(),
-          city: newEvent.city,
-          date: newEvent.date,
-          end_date: newEvent.end_date,
-          venue: newEvent.venue,
-          address: newEvent.address,
-          time: newEvent.time,
-          details: newEvent.details,
-        },
-      });
-      setEvents((prev) => [...prev, { ...newEvent, slug: newEvent.slug.trim() }]);
-      setNewEvent(EMPTY_EVENT);
-      setAddState("saved");
-      await router.invalidate();
-    } catch (err) {
-      setAddState("error");
-      setAddError(err instanceof Error ? err.message : "Failed to add event.");
+    const slug = newEvent.slug.trim().toLowerCase();
+    if (!/^[a-z0-9-]+$/.test(slug)) {
+      setAddError("Slug may only contain lowercase letters, numbers and hyphens.");
+      return;
     }
+    if (events.some((e) => e.slug === slug)) {
+      setAddError(`An event with slug "${slug}" already exists.`);
+      return;
+    }
+    if (!newEvent.city || !newEvent.date || !/^\d{4}-\d{2}-\d{2}$/.test(newEvent.end_date)) {
+      setAddError("Please fill in at least City, Date and a valid End date.");
+      return;
+    }
+    const maxOrder = events.reduce((m, e) => Math.max(m, e.sort_order), 0);
+    persist([...events, { ...newEvent, slug, sort_order: maxOrder + 1 }]);
+    setNewEvent(EMPTY_EVENT);
+    setAddState("saved");
   }
 
-  async function remove(slug: string) {
-    try {
-      await deleteFn({ data: { password, slug } });
-      setEvents((prev) => prev.filter((e) => e.slug !== slug));
-      await router.invalidate();
-    } catch (err) {
-      setRowError((r) => ({
-        ...r,
-        [slug]: err instanceof Error ? err.message : "Failed to remove.",
-      }));
-    }
+  function remove(slug: string) {
+    persist(events.filter((e) => e.slug !== slug));
   }
 
   if (!unlocked) {
@@ -264,8 +226,8 @@ function AdminPage() {
             <h1 className="text-3xl font-bold">Event Admin</h1>
             <p className="mt-1 text-sm text-muted-foreground">
               The public site shows only <strong>upcoming</strong> events, soonest first.
-              Once an event’s end date passes it drops into “Past”. Changes go live
-              immediately.
+              Once an event’s end date passes it drops into “Past”. Edits are saved in this
+              browser.
             </p>
           </div>
           <a href="/" className="shrink-0 text-sm text-primary hover:underline">
@@ -290,9 +252,6 @@ function AdminPage() {
                     <p className="text-sm text-muted-foreground">
                       {ev.date} — ended {ev.end_date}
                     </p>
-                    {rowError[ev.slug] && (
-                      <p className="mt-1 text-sm text-destructive">{rowError[ev.slug]}</p>
-                    )}
                   </div>
                   <Button
                     variant="ghost"
@@ -327,14 +286,9 @@ function AdminPage() {
                     idPrefix={ev.slug}
                     onChange={(key, v) => editField(ev.slug, key, v)}
                   />
-                  {rowError[ev.slug] && (
-                    <p className="mt-3 text-sm text-destructive">{rowError[ev.slug]}</p>
-                  )}
                   <div className="mt-4 flex items-center gap-3">
-                    <Button onClick={() => save(ev)} disabled={state === "saving"}>
-                      {state === "saving" ? (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      ) : state === "saved" ? (
+                    <Button onClick={() => save(ev)}>
+                      {state === "saved" ? (
                         <Check className="mr-2 h-4 w-4" />
                       ) : (
                         <Save className="mr-2 h-4 w-4" />
@@ -365,10 +319,8 @@ function AdminPage() {
             />
             {addError && <p className="mt-3 text-sm text-destructive">{addError}</p>}
             <div className="mt-4">
-              <Button onClick={addEvent} disabled={addState === "saving"}>
-                {addState === "saving" ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : addState === "saved" ? (
+              <Button onClick={addEvent}>
+                {addState === "saved" ? (
                   <Check className="mr-2 h-4 w-4" />
                 ) : (
                   <Plus className="mr-2 h-4 w-4" />
