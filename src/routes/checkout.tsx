@@ -81,7 +81,7 @@ const VIP_PERKS = [
 type Attendee = { firstName: string; lastName: string; email: string };
 
 function CheckoutPage() {
-  const { city, tier } = Route.useSearch();
+  const { city, tier, email: emailFromUrl } = Route.useSearch();
   const navigate = useNavigate();
   const cityInfo = CITIES[city ?? "boston"] ?? CITIES.boston;
   const isVip = tier === "vip";
@@ -93,10 +93,11 @@ function CheckoutPage() {
   const [yourInfo, setYourInfo] = useState({
     firstName: "",
     lastName: "",
-    email: "",
+    email: emailFromUrl ?? "",
     phone: "",
     countryCode: "+1",
   });
+
 
   const initialAttendees = (n: number): Attendee[] =>
     Array.from({ length: n }, () => ({ firstName: "", lastName: "", email: "" }));
