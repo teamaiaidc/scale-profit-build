@@ -1,12 +1,17 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { useMemo, useState } from "react";
-import { Check, Lock, ShieldCheck, Sparkles, ArrowLeft } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Check, Lock, RefreshCw, ShieldCheck, Sparkles, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { submitCheckoutToGhl } from "@/lib/ghl.functions";
+import {
+  lookupGhlContactByEmail,
+  pushGhlContactUpdate,
+  submitCheckoutToGhl,
+} from "@/lib/ghl.functions";
+
 
 type Search = { city?: string; tier?: string };
 
