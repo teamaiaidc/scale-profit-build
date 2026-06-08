@@ -239,7 +239,21 @@ function CheckoutPage() {
           attendees,
         },
       });
+      // Push any synced custom-field edits back to GHL on submit too
+      if (ghlContactId && Object.keys(customValues).length > 0) {
+        try {
+          await pushGhl({
+            data: {
+              contactId: ghlContactId,
+              customFields: Object.entries(customValues).map(([id, value]) => ({ id, value })),
+            },
+          });
+        } catch {
+          /* non-blocking */
+        }
+      }
       navigate({ to: "/checkout/success", search: { city, tier } as Search });
+
     } catch (err) {
       setSubmitError(
         err instanceof Error ? err.message : "Something went wrong. Please try again.",
