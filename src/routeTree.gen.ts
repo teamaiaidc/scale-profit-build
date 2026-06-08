@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as CheckoutRouteImport } from './routes/checkout'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as CheckoutSuccessRouteImport } from './routes/checkout.success'
+import { Route as ApiPublicHooksGhlRefreshRouteImport } from './routes/api/public/hooks/ghl-refresh'
 
 const CheckoutRoute = CheckoutRouteImport.update({
   id: '/checkout',
@@ -28,34 +29,53 @@ const CheckoutSuccessRoute = CheckoutSuccessRouteImport.update({
   path: '/success',
   getParentRoute: () => CheckoutRoute,
 } as any)
+const ApiPublicHooksGhlRefreshRoute =
+  ApiPublicHooksGhlRefreshRouteImport.update({
+    id: '/api/public/hooks/ghl-refresh',
+    path: '/api/public/hooks/ghl-refresh',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/checkout': typeof CheckoutRouteWithChildren
   '/checkout/success': typeof CheckoutSuccessRoute
+  '/api/public/hooks/ghl-refresh': typeof ApiPublicHooksGhlRefreshRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/checkout': typeof CheckoutRouteWithChildren
   '/checkout/success': typeof CheckoutSuccessRoute
+  '/api/public/hooks/ghl-refresh': typeof ApiPublicHooksGhlRefreshRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/checkout': typeof CheckoutRouteWithChildren
   '/checkout/success': typeof CheckoutSuccessRoute
+  '/api/public/hooks/ghl-refresh': typeof ApiPublicHooksGhlRefreshRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/checkout' | '/checkout/success'
+  fullPaths:
+    | '/'
+    | '/checkout'
+    | '/checkout/success'
+    | '/api/public/hooks/ghl-refresh'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/checkout' | '/checkout/success'
-  id: '__root__' | '/' | '/checkout' | '/checkout/success'
+  to: '/' | '/checkout' | '/checkout/success' | '/api/public/hooks/ghl-refresh'
+  id:
+    | '__root__'
+    | '/'
+    | '/checkout'
+    | '/checkout/success'
+    | '/api/public/hooks/ghl-refresh'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   CheckoutRoute: typeof CheckoutRouteWithChildren
+  ApiPublicHooksGhlRefreshRoute: typeof ApiPublicHooksGhlRefreshRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -81,6 +101,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CheckoutSuccessRouteImport
       parentRoute: typeof CheckoutRoute
     }
+    '/api/public/hooks/ghl-refresh': {
+      id: '/api/public/hooks/ghl-refresh'
+      path: '/api/public/hooks/ghl-refresh'
+      fullPath: '/api/public/hooks/ghl-refresh'
+      preLoaderRoute: typeof ApiPublicHooksGhlRefreshRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -99,6 +126,7 @@ const CheckoutRouteWithChildren = CheckoutRoute._addFileChildren(
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   CheckoutRoute: CheckoutRouteWithChildren,
+  ApiPublicHooksGhlRefreshRoute: ApiPublicHooksGhlRefreshRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

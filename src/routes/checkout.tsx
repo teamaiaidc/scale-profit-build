@@ -1,20 +1,27 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { useMemo, useState } from "react";
-import { Check, Lock, ShieldCheck, Sparkles, ArrowLeft } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Check, Lock, RefreshCw, ShieldCheck, Sparkles, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { submitCheckoutToGhl } from "@/lib/ghl.functions";
+import {
+  lookupGhlContactByEmail,
+  pushGhlContactUpdate,
+  submitCheckoutToGhl,
+} from "@/lib/ghl.functions";
 
-type Search = { city?: string; tier?: string };
+
+type Search = { city?: string; tier?: string; email?: string };
 
 export const Route = createFileRoute("/checkout")({
   validateSearch: (s: Record<string, unknown>): Search => ({
     city: typeof s.city === "string" ? s.city : "boston",
     tier: typeof s.tier === "string" ? s.tier : "ga",
+    email: typeof s.email === "string" ? s.email : undefined,
   }),
+
   head: () => ({
     meta: [
       { title: "Checkout — Scale & Profit Seminar" },
@@ -74,7 +81,7 @@ const VIP_PERKS = [
 type Attendee = { firstName: string; lastName: string; email: string };
 
 function CheckoutPage() {
-  const { city, tier } = Route.useSearch();
+  const { city, tier, email: emailFromUrl } = Route.useSearch();
   const navigate = useNavigate();
   const cityInfo = CITIES[city ?? "boston"] ?? CITIES.boston;
   const isVip = tier === "vip";
@@ -86,10 +93,11 @@ function CheckoutPage() {
   const [yourInfo, setYourInfo] = useState({
     firstName: "",
     lastName: "",
-    email: "",
+    email: emailFromUrl ?? "",
     phone: "",
     countryCode: "+1",
   });
+
 
   const initialAttendees = (n: number): Attendee[] =>
     Array.from({ length: n }, () => ({ firstName: "", lastName: "", email: "" }));
@@ -125,8 +133,93 @@ function CheckoutPage() {
   };
 
   const submitToGhl = useServerFn(submitCheckoutToGhl);
+  const lookupGhl = useServerFn(lookupGhlContactByEmail);
+  const pushGhl = useServerFn(pushGhlContactUpdate);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  // ===== GHL 2-way sync =====
+  type FieldDef = { id: string; name: string; fieldKey?: string; dataType?: string };
+  const [ghlContactId, setGhlContactId] = useState<string | null>(null);
+  const [fieldDefs, setFieldDefs] = useState<FieldDef[]>([]);
+  const [customValues, setCustomValues] = useState<Record<string, string>>({});
+  const [syncStatus, setSyncStatus] = useState<"idle" | "syncing" | "synced" | "error">("idle");
+  const [syncError, setSyncError] = useState<string | null>(null);
+
+  const lookupTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const runLookup = useCallback(
+    async (email: string) => {
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return;
+      setSyncStatus("syncing");
+      setSyncError(null);
+      try {
+        const res = await lookupGhl({ data: { email } });
+        setFieldDefs(res.fieldDefs ?? []);
+        if (res.contact) {
+          setGhlContactId(res.contact.id);
+          setYourInfo((prev) => ({
+            ...prev,
+            firstName: prev.firstName || res.contact!.firstName || "",
+            lastName: prev.lastName || res.contact!.lastName || "",
+            phone: prev.phone || res.contact!.phone || "",
+          }));
+          const map: Record<string, string> = {};
+          for (const f of res.contact.customFields) map[f.id] = f.value;
+          setCustomValues(map);
+        } else {
+          setGhlContactId(null);
+        }
+        setSyncStatus("synced");
+      } catch (err) {
+        setSyncStatus("error");
+        setSyncError(err instanceof Error ? err.message : "Sync failed");
+      }
+    },
+    [lookupGhl],
+  );
+
+  // Debounced lookup on email change
+  useEffect(() => {
+    if (lookupTimer.current) clearTimeout(lookupTimer.current);
+    if (!yourInfo.email) return;
+    lookupTimer.current = setTimeout(() => runLookup(yourInfo.email), 600);
+    return () => {
+      if (lookupTimer.current) clearTimeout(lookupTimer.current);
+    };
+  }, [yourInfo.email, runLookup]);
+
+  // Pre-fetch if email is in URL
+  useEffect(() => {
+    if (emailFromUrl) runLookup(emailFromUrl);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const schedulePush = useCallback(
+    (payload: {
+      firstName?: string;
+      lastName?: string;
+      phone?: string;
+      customFields?: Array<{ id: string; value: string }>;
+    }) => {
+      if (!ghlContactId) return;
+      if (pushTimer.current) clearTimeout(pushTimer.current);
+      pushTimer.current = setTimeout(async () => {
+        setSyncStatus("syncing");
+        try {
+          await pushGhl({ data: { contactId: ghlContactId, ...payload } });
+          setSyncStatus("synced");
+        } catch (err) {
+          setSyncStatus("error");
+          setSyncError(err instanceof Error ? err.message : "Push failed");
+        }
+      }, 800);
+    },
+    [ghlContactId, pushGhl],
+  );
+
+
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -146,7 +239,21 @@ function CheckoutPage() {
           attendees,
         },
       });
+      // Push any synced custom-field edits back to GHL on submit too
+      if (ghlContactId && Object.keys(customValues).length > 0) {
+        try {
+          await pushGhl({
+            data: {
+              contactId: ghlContactId,
+              customFields: Object.entries(customValues).map(([id, value]) => ({ id, value })),
+            },
+          });
+        } catch {
+          /* non-blocking */
+        }
+      }
       navigate({ to: "/checkout/success", search: { city, tier } as Search });
+
     } catch (err) {
       setSubmitError(
         err instanceof Error ? err.message : "Something went wrong. Please try again.",
@@ -265,6 +372,7 @@ function CheckoutPage() {
                           onChange={(e) =>
                             setYourInfo({ ...yourInfo, firstName: e.target.value })
                           }
+                          onBlur={(e) => schedulePush({ firstName: e.target.value })}
                         />
                       </Field>
                       <Field label="Last name">
@@ -274,16 +382,33 @@ function CheckoutPage() {
                           onChange={(e) =>
                             setYourInfo({ ...yourInfo, lastName: e.target.value })
                           }
+                          onBlur={(e) => schedulePush({ lastName: e.target.value })}
                         />
                       </Field>
                     </div>
                     <Field label="Email">
-                      <Input
-                        type="email"
-                        required
-                        value={yourInfo.email}
-                        onChange={(e) => setYourInfo({ ...yourInfo, email: e.target.value })}
-                      />
+                      <div className="flex gap-2">
+                        <Input
+                          type="email"
+                          required
+                          value={yourInfo.email}
+                          onChange={(e) => setYourInfo({ ...yourInfo, email: e.target.value })}
+                          onBlur={(e) => runLookup(e.target.value)}
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          onClick={() => runLookup(yourInfo.email)}
+                          disabled={!yourInfo.email || syncStatus === "syncing"}
+                          title="Sync from GHL"
+                        >
+                          <RefreshCw
+                            className={`h-4 w-4 ${syncStatus === "syncing" ? "animate-spin" : ""}`}
+                          />
+                        </Button>
+                      </div>
+                      <SyncIndicator status={syncStatus} error={syncError} hasContact={!!ghlContactId} />
                     </Field>
                     <Field label="Phone">
                       <div className="flex gap-2">
@@ -304,9 +429,38 @@ function CheckoutPage() {
                           required
                           value={yourInfo.phone}
                           onChange={(e) => setYourInfo({ ...yourInfo, phone: e.target.value })}
+                          onBlur={(e) =>
+                            schedulePush({
+                              phone: `${yourInfo.countryCode.replace(/[^+\d]/g, "")}${e.target.value}`,
+                            })
+                          }
                         />
                       </div>
                     </Field>
+
+                    {ghlContactId && fieldDefs.length > 0 && (
+                      <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-4">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          GHL Custom Fields (synced)
+                        </p>
+                        {fieldDefs.map((def) => (
+                          <Field key={def.id} label={def.name}>
+                            <Input
+                              value={customValues[def.id] ?? ""}
+                              onChange={(e) =>
+                                setCustomValues((prev) => ({ ...prev, [def.id]: e.target.value }))
+                              }
+                              onBlur={(e) =>
+                                schedulePush({
+                                  customFields: [{ id: def.id, value: e.target.value }],
+                                })
+                              }
+                            />
+                          </Field>
+                        ))}
+                      </div>
+                    )}
+
                     <Button type="button" className="w-full" onClick={() => setStep(2)}>
                       Go To Step #2
                     </Button>
@@ -535,3 +689,29 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     </div>
   );
 }
+
+function SyncIndicator({
+  status,
+  error,
+  hasContact,
+}: {
+  status: "idle" | "syncing" | "synced" | "error";
+  error: string | null;
+  hasContact: boolean;
+}) {
+  if (status === "idle") return null;
+  if (status === "syncing")
+    return <p className="mt-1 text-xs text-muted-foreground">Syncing with GHL…</p>;
+  if (status === "error")
+    return (
+      <p className="mt-1 text-xs text-destructive">
+        Sync failed{error ? `: ${error}` : ""}
+      </p>
+    );
+  return (
+    <p className="mt-1 text-xs text-primary">
+      {hasContact ? "✓ Synced from GHL contact" : "✓ No existing GHL contact — new one will be created"}
+    </p>
+  );
+}
+
