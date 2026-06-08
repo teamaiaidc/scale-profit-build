@@ -3,7 +3,17 @@ import { useState } from "react";
 import { Check, Calendar, MapPin, Clock, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import heroImg from "@/assets/coaches-hero.jpg";
+import logo from "@/assets/hero-banner.webp";
+import davidImg from "@/assets/david-peterson.webp";
+import alexImg from "@/assets/alex-shattuck.webp";
+import toolkitSystems from "@/assets/toolkit-systems.webp";
+import toolkitTeams from "@/assets/toolkit-teams.webp";
+import toolkitTime from "@/assets/toolkit-time.webp";
+import toolkitProfit from "@/assets/toolkit-profit.webp";
+import gameplan1 from "@/assets/gameplan-1.webp";
+import gameplan2 from "@/assets/gameplan-2.webp";
+import gameplan3 from "@/assets/gameplan-3.webp";
+import sponsorAgero from "@/assets/sponsor.webp";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -41,18 +51,22 @@ const painPoints = [
 
 const toolkit = [
   {
+    icon: toolkitSystems,
     title: "Proven Systems that Scale & Free Your Time",
     body: "Learn the exact operational frameworks David & Al use to run multiple high-performing teams. Repeatable, actionable systems designed to get tasks off your plate.",
   },
   {
+    icon: toolkitTeams,
     title: "High-Performing Teams Built on Culture",
     body: "Master recruiting, onboarding, and leadership strategies that attract A-players and forge a culture people want to be part of.",
   },
   {
+    icon: toolkitTime,
     title: "Reclaim Your CEO Time",
     body: "Identify your true hourly value and ruthlessly delegate tasks below it. Escape the daily grind and focus on visionary, high-ROI activities.",
   },
   {
+    icon: toolkitProfit,
     title: "Real Profit Growth & Financial Clarity",
     body: "Brutally honest insights into structuring for profitability, managing cash flow, and making marketing a predictable profit engine.",
   },
@@ -158,10 +172,13 @@ function Index() {
       {/* Header */}
       <header className="sticky top-0 z-50 border-b border-border bg-background/85 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-          <div className="flex items-center gap-2 font-bold tracking-wide">
-            <Sparkles className="h-5 w-5 text-primary" />
-            <span>SCALE & PROFIT</span>
-          </div>
+          <Link to="/" className="flex items-center gap-2">
+            <img
+              src={logo}
+              alt="Scale & Profit"
+              className="h-10 w-auto"
+            />
+          </Link>
           <Button asChild>
             <Link to="/checkout" search={{ city: "boston", tier: "ga" }}>Sign up Now!</Link>
           </Button>
@@ -170,15 +187,15 @@ function Index() {
 
       {/* Hero */}
       <section className="relative overflow-hidden">
-        <img
-          src={heroImg}
-          alt="David Peterson and Alex Shattuck"
-          width={1600}
-          height={1024}
-          className="absolute inset-0 h-full w-full object-cover opacity-30"
-        />
-        <div className="absolute inset-0 bg-gradient-to-b from-background/70 via-background/60 to-background" />
-        <div className="relative mx-auto max-w-4xl px-6 py-32 text-center md:py-44">
+        <div className="absolute inset-0 bg-gradient-to-b from-background via-card/30 to-background" />
+        <div className="relative mx-auto max-w-4xl px-6 py-24 text-center md:py-32">
+          <img
+            src={logo}
+            alt="Scale & Profit"
+            width={520}
+            height={433}
+            className="mx-auto mb-8 h-40 w-auto md:h-56"
+          />
           <p className="text-sm uppercase tracking-[0.3em] text-primary">
             Join David Peterson & Alex Shattuck at
           </p>
@@ -246,6 +263,11 @@ function Index() {
 
         <div className="mt-12 grid gap-8 md:grid-cols-2">
           <Card className="p-8">
+            <img
+              src={davidImg}
+              alt="David Peterson (Coach P)"
+              className="mb-5 h-48 w-48 rounded-full object-cover"
+            />
             <h3 className="text-2xl font-bold">David Peterson (Coach P)</h3>
             <p className="mt-1 italic text-primary">Systems & Team Building Expert</p>
             <p className="mt-4 text-muted-foreground">
@@ -272,6 +294,11 @@ function Index() {
           </Card>
 
           <Card className="p-8">
+            <img
+              src={alexImg}
+              alt="Alex Shattuck"
+              className="mb-5 h-48 w-48 rounded-full object-cover"
+            />
             <h3 className="text-2xl font-bold">Alex Shattuck</h3>
             <p className="mt-1 italic text-primary">Autopilot Recruiting</p>
             <p className="mt-4 text-muted-foreground">
@@ -338,7 +365,7 @@ function Index() {
         <div className="mt-12 grid gap-6 md:grid-cols-2">
           {toolkit.map((t) => (
             <Card key={t.title} className="p-8">
-              <Sparkles className="h-7 w-7 text-primary" />
+              <img src={t.icon} alt="" className="h-14 w-14 object-contain" />
               <h3 className="mt-4 text-xl font-bold">{t.title}</h3>
               <p className="mt-3 text-muted-foreground">{t.body}</p>
             </Card>
@@ -474,20 +501,23 @@ function Index() {
         </h2>
         <div className="mt-12 grid gap-6 md:grid-cols-3">
           {[
-            ["1", "Attend the Seminar", "Register and join us at our upcoming seminar."],
+            [gameplan1, "1", "Attend the Seminar", "Register and join us at our upcoming seminar."],
             [
+              gameplan2,
               "2",
               "Implement Our Proven Systems",
               "Apply tested methods for recruiting, onboarding, culture, marketing, accountability, structure, and profit.",
             ],
             [
+              gameplan3,
               "3",
               "Scale Confidently & Lead Like a CEO",
               "Build a profitable, sustainable agency that gives you freedom.",
             ],
-          ].map(([n, t, d]) => (
+          ].map(([icon, n, t, d]) => (
             <Card key={n} className="p-8 text-center">
-              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-primary text-2xl font-black text-primary-foreground">
+              <img src={icon} alt="" className="mx-auto h-16 w-16 object-contain" />
+              <div className="mx-auto mt-4 flex h-10 w-10 items-center justify-center rounded-full bg-primary text-lg font-black text-primary-foreground">
                 {n}
               </div>
               <h3 className="mt-5 text-xl font-bold">{t}</h3>
@@ -499,6 +529,20 @@ function Index() {
           <Button asChild size="lg">
             <Link to="/checkout" search={{ city: "boston", tier: "ga" }}>Get Your Ticket</Link>
           </Button>
+        </div>
+      </Section>
+
+      {/* Sponsors */}
+      <Section>
+        <h2 className="text-center text-3xl font-bold md:text-5xl">
+          Thank You For Being a Scale & Profit Sponsor
+        </h2>
+        <div className="mt-12 flex flex-wrap items-center justify-center gap-12">
+          <img
+            src={sponsorAgero}
+            alt="Agero"
+            className="h-16 w-auto object-contain"
+          />
         </div>
       </Section>
 
@@ -524,8 +568,22 @@ function Index() {
         </div>
       </Section>
 
-      <footer className="border-t border-border px-6 py-10 text-center text-sm text-muted-foreground">
-        © {new Date().getFullYear()} Scale & Profit Seminar. All rights reserved.
+      <footer className="border-t border-border px-6 py-12">
+        <div className="mx-auto flex max-w-6xl flex-col items-center gap-6 text-center">
+          <img src={logo} alt="Scale & Profit" className="h-16 w-auto" />
+          <div className="flex flex-wrap items-center justify-center gap-6 text-sm text-muted-foreground">
+            <a href="#" className="hover:text-foreground">Terms &amp; Conditions</a>
+            <a href="#" className="hover:text-foreground">Privacy Policy</a>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            © {new Date().getFullYear()} Scale &amp; Profit. All rights reserved.
+          </p>
+          <p className="mx-auto max-w-3xl text-xs text-muted-foreground">
+            This event is not affiliated with, endorsed by, or sponsored by State Farm. The views
+            and opinions expressed are those of the presenters and do not necessarily reflect those
+            of State Farm or its affiliates.
+          </p>
+        </div>
       </footer>
     </div>
   );
