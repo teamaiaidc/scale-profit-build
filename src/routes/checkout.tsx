@@ -1,10 +1,12 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useServerFn } from "@tanstack/react-start";
 import { useMemo, useState } from "react";
 import { Check, Lock, ShieldCheck, Sparkles, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { submitCheckoutToGhl } from "@/lib/ghl.functions";
 
 type Search = { city?: string; tier?: string };
 
@@ -122,9 +124,35 @@ function CheckoutPage() {
     });
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const submitToGhl = useServerFn(submitCheckoutToGhl);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    navigate({ to: "/checkout/success", search: { city, tier } as Search });
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      await submitToGhl({
+        data: {
+          firstName: yourInfo.firstName,
+          lastName: yourInfo.lastName,
+          email: yourInfo.email,
+          phone: `${yourInfo.countryCode.replace(/[^+\d]/g, "")}${yourInfo.phone}`,
+          city: city ?? "boston",
+          tier: (tier === "vip" ? "vip" : "ga") as "ga" | "vip",
+          quantity: isVip ? 1 : selectedQty,
+          amount: total,
+          attendees,
+        },
+      });
+      navigate({ to: "/checkout/success", search: { city, tier } as Search });
+    } catch (err) {
+      setSubmitError(
+        err instanceof Error ? err.message : "Something went wrong. Please try again.",
+      );
+      setSubmitting(false);
+    }
   };
 
   return (
