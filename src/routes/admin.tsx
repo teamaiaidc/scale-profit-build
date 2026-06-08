@@ -1,0 +1,384 @@
+import { createFileRoute, useRouter } from "@tanstack/react-router";
+import { useServerFn } from "@tanstack/react-start";
+import { useState } from "react";
+import { Lock, Save, Check, Loader2, Plus, Trash2, CalendarClock } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  listEvents,
+  verifyAdminPassword,
+  updateEvent,
+  createEvent,
+  deleteEvent,
+} from "@/lib/events.functions";
+import { getTodayISO, splitEvents, type EventRow } from "@/lib/events";
+
+export const Route = createFileRoute("/admin")({
+  head: () => ({
+    meta: [
+      { title: "Admin — Scale & Profit" },
+      { name: "robots", content: "noindex, nofollow" },
+    ],
+  }),
+  loader: async () => ({ events: await listEvents() }),
+  component: AdminPage,
+});
+
+type SaveState = "idle" | "saving" | "saved" | "error";
+
+const EMPTY_EVENT: EventRow = {
+  slug: "",
+  city: "",
+  date: "",
+  end_date: "",
+  venue: "",
+  address: "",
+  time: "9:00 AM – 4:00 PM",
+  details: "",
+  sort_order: 0,
+};
+
+const TEXT_FIELDS: { key: keyof EventRow; label: string; placeholder?: string }[] = [
+  { key: "city", label: "City / Event Name" },
+  { key: "date", label: "Date (display text)", placeholder: "e.g. August 5th–6th, 2026" },
+  { key: "venue", label: "Venue (Location)" },
+  { key: "address", label: "Address" },
+  { key: "time", label: "Time" },
+];
+
+/** Shared field group used by both the edit cards and the add-new form. */
+function EventFields({
+  value,
+  onChange,
+  withSlug = false,
+  idPrefix,
+}: {
+  value: EventRow;
+  onChange: (key: keyof EventRow, v: string) => void;
+  withSlug?: boolean;
+  idPrefix: string;
+}) {
+  return (
+    <div className="grid gap-4 sm:grid-cols-2">
+      {withSlug && (
+        <div>
+          <Label htmlFor={`${idPrefix}-slug`}>Slug (URL id, e.g. "dallas")</Label>
+          <Input
+            id={`${idPrefix}-slug`}
+            value={value.slug}
+            onChange={(e) => onChange("slug", e.target.value)}
+            placeholder="lowercase-with-hyphens"
+            className="mt-1.5"
+          />
+        </div>
+      )}
+      {TEXT_FIELDS.map((f) => (
+        <div key={f.key}>
+          <Label htmlFor={`${idPrefix}-${f.key}`}>{f.label}</Label>
+          <Input
+            id={`${idPrefix}-${f.key}`}
+            value={String(value[f.key] ?? "")}
+            placeholder={f.placeholder}
+            onChange={(e) => onChange(f.key, e.target.value)}
+            className="mt-1.5"
+          />
+        </div>
+      ))}
+      <div>
+        <Label htmlFor={`${idPrefix}-end_date`}>End date (drives scheduling)</Label>
+        <Input
+          id={`${idPrefix}-end_date`}
+          type="date"
+          value={value.end_date}
+          onChange={(e) => onChange("end_date", e.target.value)}
+          className="mt-1.5"
+        />
+        <p className="mt-1 text-xs text-muted-foreground">
+          After this date the event moves to “Past”.
+        </p>
+      </div>
+      <div className="sm:col-span-2">
+        <Label htmlFor={`${idPrefix}-details`}>Details / Extras</Label>
+        <textarea
+          id={`${idPrefix}-details`}
+          value={value.details}
+          onChange={(e) => onChange("details", e.target.value)}
+          rows={2}
+          className="mt-1.5 flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        />
+      </div>
+    </div>
+  );
+}
+
+function AdminPage() {
+  const { events: initialEvents } = Route.useLoaderData();
+  const router = useRouter();
+  const verifyFn = useServerFn(verifyAdminPassword);
+  const updateFn = useServerFn(updateEvent);
+  const createFn = useServerFn(createEvent);
+  const deleteFn = useServerFn(deleteEvent);
+
+  const [password, setPassword] = useState("");
+  const [unlocked, setUnlocked] = useState(false);
+  const [authError, setAuthError] = useState("");
+  const [checking, setChecking] = useState(false);
+
+  const [events, setEvents] = useState<EventRow[]>(initialEvents);
+  const [saveState, setSaveState] = useState<Record<string, SaveState>>({});
+  const [rowError, setRowError] = useState<Record<string, string>>({});
+
+  const [newEvent, setNewEvent] = useState<EventRow>(EMPTY_EVENT);
+  const [addState, setAddState] = useState<SaveState>("idle");
+  const [addError, setAddError] = useState("");
+
+  const today = getTodayISO();
+  const { upcoming, past } = splitEvents(events, today);
+
+  async function unlock(e: React.FormEvent) {
+    e.preventDefault();
+    setChecking(true);
+    setAuthError("");
+    try {
+      await verifyFn({ data: { password } });
+      setUnlocked(true);
+    } catch {
+      setAuthError("Incorrect password.");
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  function editField(slug: string, key: keyof EventRow, value: string) {
+    setEvents((prev) =>
+      prev.map((ev) => (ev.slug === slug ? { ...ev, [key]: value } : ev)),
+    );
+    setSaveState((s) => ({ ...s, [slug]: "idle" }));
+  }
+
+  async function save(ev: EventRow) {
+    setSaveState((s) => ({ ...s, [ev.slug]: "saving" }));
+    setRowError((r) => ({ ...r, [ev.slug]: "" }));
+    try {
+      await updateFn({
+        data: {
+          password,
+          slug: ev.slug,
+          city: ev.city,
+          date: ev.date,
+          end_date: ev.end_date,
+          venue: ev.venue,
+          address: ev.address,
+          time: ev.time,
+          details: ev.details,
+        },
+      });
+      await router.invalidate();
+      setSaveState((s) => ({ ...s, [ev.slug]: "saved" }));
+    } catch (err) {
+      setSaveState((s) => ({ ...s, [ev.slug]: "error" }));
+      setRowError((r) => ({
+        ...r,
+        [ev.slug]: err instanceof Error ? err.message : "Failed to save.",
+      }));
+    }
+  }
+
+  async function addEvent() {
+    setAddState("saving");
+    setAddError("");
+    try {
+      await createFn({
+        data: {
+          password,
+          slug: newEvent.slug.trim(),
+          city: newEvent.city,
+          date: newEvent.date,
+          end_date: newEvent.end_date,
+          venue: newEvent.venue,
+          address: newEvent.address,
+          time: newEvent.time,
+          details: newEvent.details,
+        },
+      });
+      setEvents((prev) => [...prev, { ...newEvent, slug: newEvent.slug.trim() }]);
+      setNewEvent(EMPTY_EVENT);
+      setAddState("saved");
+      await router.invalidate();
+    } catch (err) {
+      setAddState("error");
+      setAddError(err instanceof Error ? err.message : "Failed to add event.");
+    }
+  }
+
+  async function remove(slug: string) {
+    try {
+      await deleteFn({ data: { password, slug } });
+      setEvents((prev) => prev.filter((e) => e.slug !== slug));
+      await router.invalidate();
+    } catch (err) {
+      setRowError((r) => ({
+        ...r,
+        [slug]: err instanceof Error ? err.message : "Failed to remove.",
+      }));
+    }
+  }
+
+  if (!unlocked) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background px-6">
+        <Card className="w-full max-w-sm p-8">
+          <div className="mb-6 flex items-center gap-2">
+            <Lock className="h-5 w-5 text-primary" />
+            <h1 className="text-xl font-bold">Admin Access</h1>
+          </div>
+          <form onSubmit={unlock} className="space-y-4">
+            <div>
+              <Label htmlFor="admin-password">Password</Label>
+              <Input
+                id="admin-password"
+                type="password"
+                value={password}
+                autoFocus
+                onChange={(e) => setPassword(e.target.value)}
+                className="mt-1.5"
+              />
+            </div>
+            {authError && <p className="text-sm text-destructive">{authError}</p>}
+            <Button type="submit" className="w-full" disabled={checking || !password}>
+              {checking ? <Loader2 className="h-4 w-4 animate-spin" /> : "Unlock"}
+            </Button>
+          </form>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-background px-6 py-12 text-foreground">
+      <div className="mx-auto max-w-3xl">
+        <div className="mb-8 flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold">Event Admin</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              The public site shows only <strong>upcoming</strong> events, soonest first.
+              Once an event’s end date passes it drops into “Past”. Changes go live
+              immediately.
+            </p>
+          </div>
+          <a href="/" className="shrink-0 text-sm text-primary hover:underline">
+            View site →
+          </a>
+        </div>
+
+        {/* Past events */}
+        {past.length > 0 && (
+          <section className="mb-10">
+            <h2 className="mb-3 flex items-center gap-2 text-lg font-bold text-muted-foreground">
+              <CalendarClock className="h-5 w-5" /> Past Events
+            </h2>
+            <div className="space-y-3">
+              {past.map((ev) => (
+                <Card
+                  key={ev.slug}
+                  className="flex items-center justify-between gap-4 border-dashed p-4 opacity-80"
+                >
+                  <div>
+                    <p className="font-semibold capitalize">{ev.city || ev.slug}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {ev.date} — ended {ev.end_date}
+                    </p>
+                    {rowError[ev.slug] && (
+                      <p className="mt-1 text-sm text-destructive">{rowError[ev.slug]}</p>
+                    )}
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => remove(ev.slug)}
+                    className="text-destructive hover:text-destructive"
+                  >
+                    <Trash2 className="mr-1.5 h-4 w-4" /> Remove
+                  </Button>
+                </Card>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* Upcoming events */}
+        <section className="mb-10">
+          <h2 className="mb-3 text-lg font-bold">Upcoming Events</h2>
+          {upcoming.length === 0 && (
+            <p className="mb-4 rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
+              No upcoming events. Add one below so the site has something to show.
+            </p>
+          )}
+          <div className="space-y-6">
+            {upcoming.map((ev) => {
+              const state = saveState[ev.slug] ?? "idle";
+              return (
+                <Card key={ev.slug} className="p-6">
+                  <h3 className="mb-4 text-xl font-bold capitalize">{ev.city || ev.slug}</h3>
+                  <EventFields
+                    value={ev}
+                    idPrefix={ev.slug}
+                    onChange={(key, v) => editField(ev.slug, key, v)}
+                  />
+                  {rowError[ev.slug] && (
+                    <p className="mt-3 text-sm text-destructive">{rowError[ev.slug]}</p>
+                  )}
+                  <div className="mt-4 flex items-center gap-3">
+                    <Button onClick={() => save(ev)} disabled={state === "saving"}>
+                      {state === "saving" ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : state === "saved" ? (
+                        <Check className="mr-2 h-4 w-4" />
+                      ) : (
+                        <Save className="mr-2 h-4 w-4" />
+                      )}
+                      {state === "saved" ? "Saved" : "Save changes"}
+                    </Button>
+                  </div>
+                </Card>
+              );
+            })}
+          </div>
+        </section>
+
+        {/* Add new event */}
+        <section>
+          <h2 className="mb-3 flex items-center gap-2 text-lg font-bold">
+            <Plus className="h-5 w-5 text-primary" /> Add Upcoming Event
+          </h2>
+          <Card className="p-6">
+            <EventFields
+              value={newEvent}
+              idPrefix="new"
+              withSlug
+              onChange={(key, v) => {
+                setNewEvent((prev) => ({ ...prev, [key]: v }));
+                setAddState("idle");
+              }}
+            />
+            {addError && <p className="mt-3 text-sm text-destructive">{addError}</p>}
+            <div className="mt-4">
+              <Button onClick={addEvent} disabled={addState === "saving"}>
+                {addState === "saving" ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : addState === "saved" ? (
+                  <Check className="mr-2 h-4 w-4" />
+                ) : (
+                  <Plus className="mr-2 h-4 w-4" />
+                )}
+                {addState === "saved" ? "Added" : "Add event"}
+              </Button>
+            </div>
+          </Card>
+        </section>
+      </div>
+    </div>
+  );
+}

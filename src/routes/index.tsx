@@ -3,6 +3,8 @@ import { useState } from "react";
 import { Check, Calendar, MapPin, Clock, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { listEvents } from "@/lib/events.functions";
+import { getTodayISO, splitEvents } from "@/lib/events";
 import logo from "@/assets/hero-banner.webp";
 import davidImg from "@/assets/david-peterson.webp";
 import alexImg from "@/assets/alex-shattuck.webp";
@@ -31,6 +33,7 @@ export const Route = createFileRoute("/")({
       },
     ],
   }),
+  loader: async () => ({ events: await listEvents() }),
   component: Index,
 });
 
@@ -102,27 +105,6 @@ const day2 = [
   ["3:00 PM", "Event Ends"],
 ];
 
-const events = [
-  {
-    city: "Boston",
-    date: "June 2nd & 3rd, 2026",
-    venue: "Aloft Boston Seaport District",
-    address: "401-403 D Street, Boston, MA 02210",
-  },
-  {
-    city: "Nashville",
-    date: "August 5th–6th, 2026",
-    venue: "W Nashville Hotel",
-    address: "300 12th Ave S, Nashville, TN 37203",
-  },
-  {
-    city: "California",
-    date: "December 8th–9th, 2026",
-    venue: "Venue TBA",
-    address: "California",
-  },
-];
-
 const tiers = [
   {
     name: "General Admission",
@@ -165,7 +147,12 @@ function Section({
 }
 
 function Index() {
+  const { events: allEvents } = Route.useLoaderData();
   const [openEvent, setOpenEvent] = useState<number | null>(0);
+  // Show only upcoming events (soonest first); fall back to all if none are upcoming.
+  const { upcoming } = splitEvents(allEvents, getTodayISO());
+  const events = upcoming.length > 0 ? upcoming : allEvents;
+  const featured = events[0];
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -380,22 +367,24 @@ function Index() {
           <Card className="p-5">
             <MapPin className="h-5 w-5 text-primary" />
             <p className="mt-2 text-sm text-muted-foreground">Location</p>
-            <p className="font-semibold">Aloft Boston Seaport District</p>
+            <p className="font-semibold">{featured.venue}</p>
           </Card>
           <Card className="p-5">
             <Calendar className="h-5 w-5 text-primary" />
             <p className="mt-2 text-sm text-muted-foreground">Dates</p>
-            <p className="font-semibold">June 2nd & 3rd, 2026</p>
+            <p className="font-semibold">{featured.date}</p>
           </Card>
           <Card className="p-5">
             <Clock className="h-5 w-5 text-primary" />
             <p className="mt-2 text-sm text-muted-foreground">Time</p>
-            <p className="font-semibold">9:00 AM – 4:00 PM</p>
+            <p className="font-semibold">{featured.time}</p>
           </Card>
           <Card className="p-5">
             <Sparkles className="h-5 w-5 text-primary" />
             <p className="mt-2 text-sm text-muted-foreground">Extras</p>
-            <p className="font-semibold">Networking Cocktail Hour Day 1</p>
+            <p className="font-semibold">
+              {featured.details || "Networking Cocktail Hour Day 1"}
+            </p>
           </Card>
         </div>
 
@@ -437,7 +426,7 @@ function Index() {
 
         <div className="mt-10 space-y-4">
           {events.map((e, i) => (
-            <Card key={e.city} className="overflow-hidden">
+            <Card key={e.slug} className="overflow-hidden">
               <button
                 onClick={() => setOpenEvent(openEvent === i ? null : i)}
                 className="flex w-full items-center justify-between gap-4 p-6 text-left transition-colors hover:bg-muted/40"
@@ -478,7 +467,7 @@ function Index() {
                         <Link
                           to="/checkout"
                           search={{
-                            city: e.city.toLowerCase(),
+                            city: e.slug,
                             tier: tier.featured ? "vip" : "ga",
                           }}
                         >

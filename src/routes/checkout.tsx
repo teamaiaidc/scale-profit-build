@@ -11,6 +11,7 @@ import {
   pushGhlContactUpdate,
   submitCheckoutToGhl,
 } from "@/lib/ghl.functions";
+import { listEvents } from "@/lib/events.functions";
 
 
 type Search = { city?: string; tier?: string; email?: string };
@@ -28,6 +29,7 @@ export const Route = createFileRoute("/checkout")({
       { name: "description", content: "Reserve your seat at the Scale & Profit Seminar." },
     ],
   }),
+  loader: async () => ({ events: await listEvents() }),
   component: CheckoutPage,
 });
 
@@ -82,8 +84,19 @@ type Attendee = { firstName: string; lastName: string; email: string };
 
 function CheckoutPage() {
   const { city, tier, email: emailFromUrl } = Route.useSearch();
+  const { events } = Route.useLoaderData();
   const navigate = useNavigate();
-  const cityInfo = CITIES[city ?? "boston"] ?? CITIES.boston;
+  // Build the city map from live event data, falling back to the hardcoded defaults.
+  const cities = useMemo(() => {
+    const map: Record<string, { name: string; date: string; venue: string; address: string }> = {
+      ...CITIES,
+    };
+    for (const e of events) {
+      map[e.slug] = { name: e.city, date: e.date, venue: e.venue, address: e.address };
+    }
+    return map;
+  }, [events]);
+  const cityInfo = cities[city ?? "boston"] ?? cities.boston ?? CITIES.boston;
   const isVip = tier === "vip";
 
   const [step, setStep] = useState<1 | 2 | 3>(1);
