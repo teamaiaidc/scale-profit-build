@@ -446,13 +446,17 @@ function CheckoutPage() {
                       </div>
                     </div>
                     <div className="flex gap-3">
-                      <Button type="button" variant="outline" onClick={() => setStep(2)}>
+                      <Button type="button" variant="outline" onClick={() => setStep(2)} disabled={submitting}>
                         Back
                       </Button>
-                      <Button type="submit" className="flex-1">
-                        <Lock className="mr-2 h-4 w-4" /> Pay ${total.toLocaleString()}.00
+                      <Button type="submit" className="flex-1" disabled={submitting}>
+                        <Lock className="mr-2 h-4 w-4" />
+                        {submitting ? "Processing…" : `Pay $${total.toLocaleString()}.00`}
                       </Button>
                     </div>
+                    {submitError && (
+                      <p className="text-center text-xs text-destructive">{submitError}</p>
+                    )}
                     <p className="flex items-center justify-center gap-2 text-center text-xs text-muted-foreground">
                       <ShieldCheck className="h-4 w-4 text-primary" /> 100% Secure & Safe Payments
                     </p>
