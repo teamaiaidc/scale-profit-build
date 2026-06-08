@@ -139,3 +139,133 @@ export const submitCheckoutToGhl = createServerFn({ method: "POST" })
 
     return { ok: true, contactId, opportunityId, tags };
   });
+
+// ============== 2-way sync helpers ==============
+
+type GhlCustomFieldDef = {
+  id: string;
+  name: string;
+  fieldKey?: string;
+  dataType?: string;
+};
+
+type GhlContactSnapshot = {
+  id: string;
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  phone?: string;
+  customFields: Array<{ id: string; value: string }>;
+};
+
+const lookupSchema = z.object({ email: z.string().email().max(200) });
+
+export const lookupGhlContactByEmail = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) => lookupSchema.parse(d))
+  .handler(async ({ data }) => {
+    let fieldDefs: GhlCustomFieldDef[] = [];
+    try {
+      const defs = (await ghlFetch(
+        `/locations/${GHL_LOCATION_ID}/customFields`,
+        { method: "GET" },
+      )) as { customFields?: GhlCustomFieldDef[] };
+      fieldDefs = defs.customFields ?? [];
+    } catch (err) {
+      console.warn("GHL field defs fetch failed:", (err as Error).message);
+    }
+
+    let contact: GhlContactSnapshot | null = null;
+    try {
+      const q = encodeURIComponent(data.email);
+      const res = (await ghlFetch(
+        `/contacts/?locationId=${GHL_LOCATION_ID}&query=${q}`,
+        { method: "GET" },
+      )) as {
+        contacts?: Array<{
+          id: string;
+          firstName?: string;
+          lastName?: string;
+          email?: string;
+          phone?: string;
+          customFields?: Array<{ id: string; value?: string; field_value?: string }>;
+        }>;
+      };
+      const hit = res.contacts?.find(
+        (c) => c.email?.toLowerCase() === data.email.toLowerCase(),
+      );
+      if (hit) {
+        contact = {
+          id: hit.id,
+          firstName: hit.firstName,
+          lastName: hit.lastName,
+          email: hit.email,
+          phone: hit.phone,
+          customFields: (hit.customFields ?? []).map((c) => ({
+            id: c.id,
+            value: String(c.value ?? c.field_value ?? ""),
+          })),
+        };
+      }
+    } catch (err) {
+      console.warn("GHL contact lookup failed:", (err as Error).message);
+    }
+
+    return { contact, fieldDefs };
+  });
+
+const pushSchema = z.object({
+  contactId: z.string().min(1).max(100),
+  firstName: z.string().max(100).optional(),
+  lastName: z.string().max(100).optional(),
+  phone: z.string().max(30).optional(),
+  customFields: z
+    .array(z.object({ id: z.string().min(1).max(100), value: z.string().max(2000) }))
+    .max(50)
+    .optional(),
+});
+
+export const pushGhlContactUpdate = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) => pushSchema.parse(d))
+  .handler(async ({ data }) => {
+    const body: Record<string, unknown> = {};
+    if (data.firstName !== undefined) body.firstName = data.firstName;
+    if (data.lastName !== undefined) body.lastName = data.lastName;
+    if (data.phone !== undefined) body.phone = data.phone;
+    if (data.customFields && data.customFields.length > 0) {
+      body.customFields = data.customFields.map((c) => ({
+        id: c.id,
+        field_value: c.value,
+      }));
+    }
+    const res = (await ghlFetch(`/contacts/${data.contactId}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    })) as {
+      contact?: {
+        id: string;
+        firstName?: string;
+        lastName?: string;
+        email?: string;
+        phone?: string;
+        customFields?: Array<{ id: string; value?: string; field_value?: string }>;
+      };
+    };
+    const c = res.contact;
+    return {
+      ok: true,
+      contact: c
+        ? ({
+            id: c.id,
+            firstName: c.firstName,
+            lastName: c.lastName,
+            email: c.email,
+            phone: c.phone,
+            customFields: (c.customFields ?? []).map((f) => ({
+              id: f.id,
+              value: String(f.value ?? f.field_value ?? ""),
+            })),
+          } as GhlContactSnapshot)
+        : null,
+    };
+  });
+
