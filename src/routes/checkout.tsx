@@ -263,7 +263,7 @@ function CheckoutPage() {
   const submitToGhl = useServerFn(submitCheckoutToGhl);
   const lookupGhl = useServerFn(lookupGhlContactByEmail);
   const pushGhl = useServerFn(pushGhlContactUpdate);
-  const [submitting, setSubmitting] = useState(false);
+  const submitting = false;
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   // ===== GHL 2-way sync =====
@@ -347,10 +347,10 @@ function CheckoutPage() {
     [ghlContactId, pushGhl],
   );
 
-  // Questions → Payment: all questions required, then save the contact + info to
-  // GHL (so the survey is captured even if payment is abandoned) and reveal the
-  // embedded GHL payment form.
-  const goToPaymentFromSurvey = async () => {
+  // Questions → Payment: validate, then reveal the embedded GHL payment form
+  // immediately. The GHL contact/opportunity save runs in the background so
+  // the buyer isn't stuck waiting on 3–4 GHL round-trips before they can pay.
+  const goToPaymentFromSurvey = () => {
     if (
       !survey.agencyState.trim() ||
       !survey.hasMoa ||
@@ -361,51 +361,47 @@ function CheckoutPage() {
       return;
     }
     setSurveyError(null);
-    setSubmitting(true);
     setSubmitError(null);
-    try {
-      await submitToGhl({
-        data: {
-          firstName: yourInfo.firstName,
-          lastName: yourInfo.lastName,
-          email: yourInfo.email,
-          phone: `${yourInfo.countryCode.replace(/[^+\d]/g, "")}${yourInfo.phone}`,
-          city: city ?? "boston",
-          tier: (tier === "vip" ? "vip" : "ga") as "ga" | "vip",
-          quantity: isVip ? 1 : selectedQty,
-          amount: total,
-          survey,
-          // Event details → opportunity cohort fields (for email/messaging merges).
-          event: {
-            name: cityInfo.name,
-            date: cityInfo.date,
-            venue: cityInfo.venue,
-            address: cityInfo.address,
-            time: events.find((e: EventRow) => e.slug === (city ?? "boston"))?.time,
-          },
+
+    // Fire-and-forget: capture the buyer + survey in GHL in the background.
+    submitToGhl({
+      data: {
+        firstName: yourInfo.firstName,
+        lastName: yourInfo.lastName,
+        email: yourInfo.email,
+        phone: `${yourInfo.countryCode.replace(/[^+\d]/g, "")}${yourInfo.phone}`,
+        city: city ?? "boston",
+        tier: (tier === "vip" ? "vip" : "ga") as "ga" | "vip",
+        quantity: isVip ? 1 : selectedQty,
+        amount: total,
+        survey,
+        event: {
+          name: cityInfo.name,
+          date: cityInfo.date,
+          venue: cityInfo.venue,
+          address: cityInfo.address,
+          time: events.find((e: EventRow) => e.slug === (city ?? "boston"))?.time,
         },
-      });
-      // Push any synced custom-field edits back to GHL too
-      if (ghlContactId && Object.keys(customValues).length > 0) {
-        try {
-          await pushGhl({
-            data: {
-              contactId: ghlContactId,
-              customFields: Object.entries(customValues).map(([id, value]) => ({ id, value })),
-            },
-          });
-        } catch {
-          /* non-blocking */
-        }
-      }
-      setStep(3);
-    } catch (err) {
+      },
+    }).catch((err) => {
+      console.warn("Background GHL submit failed:", err);
       setSubmitError(
-        err instanceof Error ? err.message : "Something went wrong. Please try again.",
+        err instanceof Error ? err.message : "Could not save your details, but you can still pay.",
       );
-    } finally {
-      setSubmitting(false);
+    });
+
+    if (ghlContactId && Object.keys(customValues).length > 0) {
+      pushGhl({
+        data: {
+          contactId: ghlContactId,
+          customFields: Object.entries(customValues).map(([id, value]) => ({ id, value })),
+        },
+      }).catch(() => {
+        /* non-blocking */
+      });
     }
+
+    setStep(3);
   };
 
   return (
