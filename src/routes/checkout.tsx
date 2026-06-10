@@ -225,6 +225,41 @@ function CheckoutPage() {
     return u.toString();
   }, [paymentFormUrl, city, cityInfo.name, cityInfo.date, isVip, yourInfo]);
 
+  // When the embedded GHL payment form reports a successful submission, take
+  // the buyer straight to our confirmation/loop page instead of GHL's default
+  // thank-you screen. GHL's form_embed.js posts messages from its origin when
+  // the form is submitted — match loosely to cover variants.
+  useEffect(() => {
+    if (step !== 3) return;
+    const onMessage = (e: MessageEvent) => {
+      try {
+        const origin = e.origin || "";
+        if (!/aiaimastermind\.com|leadconnectorhq\.com|msgsndr\.com/i.test(origin)) return;
+        const raw = e.data;
+        const str =
+          typeof raw === "string" ? raw : raw && typeof raw === "object" ? JSON.stringify(raw) : "";
+        if (!/form[_-]?submit|submitted|success|payment[_-]?success/i.test(str)) return;
+        navigate({
+          to: "/confirmation",
+          search: {
+            city: city ?? "boston",
+            tier: isVip ? "vip" : "ga",
+            qty: 1,
+            email: yourInfo.email || undefined,
+            firstName: yourInfo.firstName || undefined,
+            lastName: yourInfo.lastName || undefined,
+          },
+        });
+      } catch {
+        /* ignore */
+      }
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [step, navigate, city, isVip, yourInfo]);
+
+
+
   const submitToGhl = useServerFn(submitCheckoutToGhl);
   const lookupGhl = useServerFn(lookupGhlContactByEmail);
   const pushGhl = useServerFn(pushGhlContactUpdate);
