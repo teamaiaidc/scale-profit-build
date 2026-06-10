@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
-import { Lock, Save, Check, Loader2, Plus, Trash2, CalendarClock } from "lucide-react";
+import { Lock, Save, Check, Loader2, Plus, Trash2, CalendarClock, FlaskConical } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -34,6 +34,76 @@ const EMPTY_EVENT: EventRow = {
   details: "",
   sort_order: 0,
 };
+
+// Sample events for quick testing: 2 past, 4 upcoming (relative to mid-2026).
+const TEST_EVENTS: EventRow[] = [
+  {
+    slug: "boston",
+    city: "Boston",
+    date: "March 10th–11th, 2026",
+    end_date: "2026-03-11",
+    venue: "Aloft Boston Seaport District",
+    address: "401-403 D Street, Boston, MA 02210",
+    time: "9:00 AM – 4:00 PM",
+    details: "Networking Cocktail Hour Day 1",
+    sort_order: 1,
+  },
+  {
+    slug: "phoenix",
+    city: "Phoenix",
+    date: "May 5th–6th, 2026",
+    end_date: "2026-05-06",
+    venue: "The Camby, Autograph Collection",
+    address: "2401 E Camelback Rd, Phoenix, AZ 85016",
+    time: "9:00 AM – 4:00 PM",
+    details: "",
+    sort_order: 2,
+  },
+  {
+    slug: "dallas",
+    city: "Dallas",
+    date: "July 14th–15th, 2026",
+    end_date: "2026-07-15",
+    venue: "The Statler Dallas",
+    address: "1914 Commerce St, Dallas, TX 75201",
+    time: "9:00 AM – 4:00 PM",
+    details: "Networking Cocktail Hour Day 1",
+    sort_order: 3,
+  },
+  {
+    slug: "nashville",
+    city: "Nashville",
+    date: "August 5th–6th, 2026",
+    end_date: "2026-08-06",
+    venue: "W Nashville Hotel",
+    address: "300 12th Ave S, Nashville, TN 37203",
+    time: "9:00 AM – 4:00 PM",
+    details: "",
+    sort_order: 4,
+  },
+  {
+    slug: "chicago",
+    city: "Chicago",
+    date: "October 20th–21st, 2026",
+    end_date: "2026-10-21",
+    venue: "The Langham Chicago",
+    address: "330 N Wabash Ave, Chicago, IL 60611",
+    time: "9:00 AM – 4:00 PM",
+    details: "VIP Dinner Day 1",
+    sort_order: 5,
+  },
+  {
+    slug: "california",
+    city: "California",
+    date: "December 8th–9th, 2026",
+    end_date: "2026-12-09",
+    venue: "Venue TBA",
+    address: "California",
+    time: "9:00 AM – 4:00 PM",
+    details: "",
+    sort_order: 6,
+  },
+];
 
 const TEXT_FIELDS: { key: keyof EventRow; label: string; placeholder?: string }[] = [
   { key: "city", label: "City / Event Name" },
@@ -188,6 +258,11 @@ function AdminPage() {
     persist(events.filter((e) => e.slug !== slug));
   }
 
+  function loadTestData() {
+    persist(TEST_EVENTS.map((e) => ({ ...e })));
+    setSaveState({});
+  }
+
   if (!unlocked) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background px-6">
@@ -230,9 +305,14 @@ function AdminPage() {
               browser.
             </p>
           </div>
-          <a href="/" className="shrink-0 text-sm text-primary hover:underline">
-            View site →
-          </a>
+          <div className="flex shrink-0 items-center gap-4">
+            <Button variant="outline" size="sm" onClick={loadTestData}>
+              <FlaskConical className="mr-1.5 h-4 w-4" /> Load test data
+            </Button>
+            <a href="/" className="text-sm text-primary hover:underline">
+              View site →
+            </a>
+          </div>
         </div>
 
         {/* Past events */}
@@ -286,7 +366,7 @@ function AdminPage() {
                     idPrefix={ev.slug}
                     onChange={(key, v) => editField(ev.slug, key, v)}
                   />
-                  <div className="mt-4 flex items-center gap-3">
+                  <div className="mt-4 flex items-center justify-between gap-3">
                     <Button onClick={() => save(ev)}>
                       {state === "saved" ? (
                         <Check className="mr-2 h-4 w-4" />
@@ -294,6 +374,13 @@ function AdminPage() {
                         <Save className="mr-2 h-4 w-4" />
                       )}
                       {state === "saved" ? "Saved" : "Save changes"}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      onClick={() => remove(ev.slug)}
+                      className="text-destructive hover:text-destructive"
+                    >
+                      <Trash2 className="mr-1.5 h-4 w-4" /> Delete
                     </Button>
                   </div>
                 </Card>

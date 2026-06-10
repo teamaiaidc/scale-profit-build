@@ -1,18 +1,20 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, Lock, RefreshCw, ShieldCheck, Sparkles, ArrowLeft } from "lucide-react";
+import { Check, RefreshCw, ShieldCheck, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  listGhlProducts,
   lookupGhlContactByEmail,
   pushGhlContactUpdate,
   submitCheckoutToGhl,
 } from "@/lib/ghl.functions";
 import { listEvents } from "@/lib/events.functions";
 import { loadStoredEvents } from "@/lib/events.store";
+import logo from "@/assets/hero-banner.webp";
 
 
 type Search = { city?: string; tier?: string; email?: string };
@@ -30,7 +32,10 @@ export const Route = createFileRoute("/checkout")({
       { name: "description", content: "Reserve your seat at the Scale & Profit Seminar." },
     ],
   }),
-  loader: async () => ({ events: await listEvents() }),
+  loader: async () => ({
+    events: await listEvents(),
+    ghlProducts: (await listGhlProducts()).products,
+  }),
   component: CheckoutPage,
 });
 
@@ -81,17 +86,65 @@ const VIP_PERKS = [
   "90-minute exclusive implementation call",
 ];
 
-type Attendee = { firstName: string; lastName: string; email: string };
+const SHIRT_SIZES = ["Small", "Medium", "Large", "XL", "XXL", "XXXL"];
+
+// GHL-hosted payment forms, embedded as Step 2. Real payment + purchase
+// automations fire inside GHL.
+const GHL_PAYMENT_FORMS: Record<"ga" | "vip", string> = {
+  ga: "https://go.aiaimastermind.com/widget/form/EB8ObhaPz6Fw2Fq6urY0",
+  vip: "https://go.aiaimastermind.com/widget/form/VaXtddWW607K6i0P30d8",
+};
+const GHL_FORM_EMBED_JS = "https://go.aiaimastermind.com/js/form_embed.js";
 
 function CheckoutPage() {
   const { city, tier, email: emailFromUrl } = Route.useSearch();
-  const { events: loaderEvents } = Route.useLoaderData();
+  const { events: loaderEvents, ghlProducts } = Route.useLoaderData();
   const [events, setEvents] = useState(loaderEvents);
+
+  // Live pricing pulled from the two GHL products (fall back to built-in values).
+  const live = useMemo(() => {
+    const findProduct = (matcher: RegExp) =>
+      ghlProducts.find((p) => matcher.test(p.name));
+
+    // VIP: single one-time price.
+    const vipProduct = findProduct(/vip/i);
+    const vipPrice =
+      vipProduct?.prices.find((pr) => pr.type === "one_time") ?? vipProduct?.prices[0];
+    const vip = vipPrice && vipPrice.amount > 0 ? vipPrice.amount : null;
+
+    // GA: build the full quantity table from the product's prices, deriving the
+    // ticket count from each price name (e.g. "… 2 Tickets - SAVE $200" → qty 2).
+    const gaProduct = findProduct(/general|admission|\bga\b/i);
+    let gaTiers: { qty: number; label: string; price: number }[] | null = null;
+    if (gaProduct && gaProduct.prices.length > 0) {
+      const rows = gaProduct.prices
+        .map((pr) => {
+          const qty = Number(pr.name.match(/(\d+)\s*ticket/i)?.[1] ?? 0);
+          return qty > 0 && pr.amount > 0
+            ? {
+                qty,
+                label:
+                  qty === 1
+                    ? "Scale & Profit - Single Ticket Only"
+                    : `Scale & Profit - ${qty} Tickets`,
+                price: pr.amount,
+              }
+            : null;
+        })
+        .filter((r): r is { qty: number; label: string; price: number } => r !== null)
+        .sort((a, b) => a.qty - b.qty);
+      if (rows.length > 0) gaTiers = rows;
+    }
+
+    return { vip, gaTiers };
+  }, [ghlProducts]);
+
+  // GA options come from GHL when available, else the built-in table.
+  const gaOptions = live.gaTiers ?? GA_QTY;
   // Pick up this browser's admin edits (localStorage) after hydration.
   useEffect(() => {
     setEvents(loadStoredEvents(loaderEvents));
   }, [loaderEvents]);
-  const navigate = useNavigate();
   // Build the city map from live event data, falling back to the hardcoded defaults.
   const cities = useMemo(() => {
     const map: Record<string, { name: string; date: string; venue: string; address: string }> = {
@@ -105,9 +158,30 @@ function CheckoutPage() {
   const cityInfo = cities[city ?? "boston"] ?? cities.boston ?? CITIES.boston;
   const isVip = tier === "vip";
 
+  // Step 2 embedded GHL payment form (per tier).
+  const paymentFormUrl = GHL_PAYMENT_FORMS[isVip ? "vip" : "ga"];
+  const paymentFormId = paymentFormUrl.split("/").pop() ?? "";
+  // Load GHL's embed script once so the iframe auto-resizes.
+  useEffect(() => {
+    if (document.querySelector(`script[src="${GHL_FORM_EMBED_JS}"]`)) return;
+    const s = document.createElement("script");
+    s.src = GHL_FORM_EMBED_JS;
+    s.async = true;
+    document.body.appendChild(s);
+  }, []);
+
   const [step, setStep] = useState<1 | 2 | 3>(1);
-  const [selectedQty, setSelectedQty] = useState<number>(isVip ? 1 : 1);
-  const [coupon, setCoupon] = useState("");
+  // Quantity is now chosen inside the GHL payment form; we always treat this
+  // app's order as a single base ticket for the summary/contact record.
+  const selectedQty = 1;
+
+  const [survey, setSurvey] = useState({
+    agencyState: "",
+    hasMoa: "",
+    attendedBefore: "",
+    shirtSize: "",
+  });
+  const [surveyError, setSurveyError] = useState<string | null>(null);
 
   const [yourInfo, setYourInfo] = useState({
     firstName: "",
@@ -118,38 +192,32 @@ function CheckoutPage() {
   });
 
 
-  const initialAttendees = (n: number): Attendee[] =>
-    Array.from({ length: n }, () => ({ firstName: "", lastName: "", email: "" }));
-  const [attendees, setAttendees] = useState<Attendee[]>(initialAttendees(1));
-
-  const [billing, setBilling] = useState({
-    cardName: "",
-    cardNumber: "",
-    expiry: "",
-    cvc: "",
-    address: "",
-    city: "",
-    state: "",
-    zip: "",
-    country: "United States",
-  });
-
   const selected = useMemo(() => {
-    if (isVip) return { qty: 1, label: "Scale & Profit - VIP", price: 1600 };
-    return GA_QTY.find((g) => g.qty === selectedQty) ?? GA_QTY[0];
-  }, [isVip, selectedQty]);
+    if (isVip)
+      return { qty: 1, label: "Scale & Profit - VIP", price: live.vip ?? 1600 };
+    return gaOptions.find((g) => g.qty === selectedQty) ?? gaOptions[0];
+  }, [isVip, selectedQty, gaOptions, live.vip]);
 
   const total = selected.price;
 
-  const updateAttendeeCount = (qty: number) => {
-    setSelectedQty(qty);
-    setAttendees((prev) => {
-      const next = [...prev];
-      while (next.length < qty) next.push({ firstName: "", lastName: "", email: "" });
-      next.length = qty;
-      return next;
-    });
-  };
+  // Embedded payment form URL with the event + buyer details passed through, so
+  // the GHL order record captures WHICH event was purchased (and prefills the
+  // buyer's info). Requires matching fields/query-keys configured in the GHL form.
+  const paymentSrc = useMemo(() => {
+    const u = new URL(paymentFormUrl);
+    const params: Record<string, string> = {
+      event_city: city ?? "boston",
+      event_name: cityInfo.name,
+      event_date: cityInfo.date,
+      ticket_tier: isVip ? "VIP" : "General Admission",
+      first_name: yourInfo.firstName,
+      last_name: yourInfo.lastName,
+      email: yourInfo.email,
+      phone: `${yourInfo.countryCode.replace(/[^+\d]/g, "")}${yourInfo.phone}`,
+    };
+    for (const [k, v] of Object.entries(params)) if (v) u.searchParams.set(k, v);
+    return u.toString();
+  }, [paymentFormUrl, city, cityInfo.name, cityInfo.date, isVip, yourInfo]);
 
   const submitToGhl = useServerFn(submitCheckoutToGhl);
   const lookupGhl = useServerFn(lookupGhlContactByEmail);
@@ -240,8 +308,20 @@ function CheckoutPage() {
 
 
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // Questions → Payment: all questions required, then save the contact + info to
+  // GHL (so the survey is captured even if payment is abandoned) and reveal the
+  // embedded GHL payment form.
+  const goToPaymentFromSurvey = async () => {
+    if (
+      !survey.agencyState.trim() ||
+      !survey.hasMoa ||
+      !survey.attendedBefore.trim() ||
+      !survey.shirtSize
+    ) {
+      setSurveyError("Please answer all questions before continuing.");
+      return;
+    }
+    setSurveyError(null);
     setSubmitting(true);
     setSubmitError(null);
     try {
@@ -255,10 +335,10 @@ function CheckoutPage() {
           tier: (tier === "vip" ? "vip" : "ga") as "ga" | "vip",
           quantity: isVip ? 1 : selectedQty,
           amount: total,
-          attendees,
+          survey,
         },
       });
-      // Push any synced custom-field edits back to GHL on submit too
+      // Push any synced custom-field edits back to GHL too
       if (ghlContactId && Object.keys(customValues).length > 0) {
         try {
           await pushGhl({
@@ -271,12 +351,12 @@ function CheckoutPage() {
           /* non-blocking */
         }
       }
-      navigate({ to: "/checkout/success", search: { city, tier } as Search });
-
+      setStep(3);
     } catch (err) {
       setSubmitError(
         err instanceof Error ? err.message : "Something went wrong. Please try again.",
       );
+    } finally {
       setSubmitting(false);
     }
   };
@@ -285,9 +365,8 @@ function CheckoutPage() {
     <div className="min-h-screen bg-background text-foreground">
       <header className="border-b border-border bg-background/85 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-          <Link to="/" className="flex items-center gap-2 font-bold tracking-wide">
-            <Sparkles className="h-5 w-5 text-primary" />
-            <span>SCALE & PROFIT</span>
+          <Link to="/" className="flex items-center gap-2">
+            <img src={logo} alt="Scale & Profit" className="h-10 w-auto" />
           </Link>
           <Link
             to="/"
@@ -312,51 +391,13 @@ function CheckoutPage() {
         <div className="grid gap-8 lg:grid-cols-[1fr_420px]">
           {/* LEFT: forms */}
           <div className="space-y-6">
-            {/* Ticket selector for GA */}
-            {!isVip && (
-              <Card className="p-6">
-                <h2 className="text-lg font-bold">Payment</h2>
-                <p className="text-sm text-muted-foreground">Choose your ticket bundle</p>
-                <div className="mt-4 divide-y divide-border rounded-lg border border-border">
-                  <div className="grid grid-cols-[1fr_80px_100px] gap-3 px-4 py-2 text-xs font-semibold uppercase text-muted-foreground">
-                    <span>Item</span>
-                    <span className="text-center">Quantity</span>
-                    <span className="text-right">Price</span>
-                  </div>
-                  {GA_QTY.map((opt) => (
-                    <label
-                      key={opt.qty}
-                      className={`grid cursor-pointer grid-cols-[1fr_80px_100px] items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/40 ${
-                        selectedQty === opt.qty ? "bg-muted/40" : ""
-                      }`}
-                    >
-                      <span className="flex items-center gap-3 text-sm font-medium">
-                        <input
-                          type="radio"
-                          name="qty"
-                          checked={selectedQty === opt.qty}
-                          onChange={() => updateAttendeeCount(opt.qty)}
-                          className="accent-primary"
-                        />
-                        {opt.label}
-                      </span>
-                      <span className="text-center text-sm">{opt.qty}</span>
-                      <span className="text-right text-sm font-semibold text-primary">
-                        ${opt.price.toLocaleString()}.00
-                      </span>
-                    </label>
-                  ))}
-                </div>
-              </Card>
-            )}
-
             {/* Stepper */}
             <Card className="p-6">
               <div className="mb-6 flex items-center gap-2 text-sm">
                 {[
                   [1, "Your Info"],
-                  [2, "Who's Attending?"],
-                  [3, isVip ? "Billing Info" : "Finalize Sign Up!"],
+                  [2, "A Few Questions"],
+                  [3, "Payment"],
                 ].map(([n, label]) => (
                   <div key={n} className="flex items-center gap-2">
                     <span
@@ -380,7 +421,7 @@ function CheckoutPage() {
                 ))}
               </div>
 
-              <form onSubmit={handleSubmit} className="space-y-5">
+              <form onSubmit={(e) => e.preventDefault()} className="space-y-5">
                 {step === 1 && (
                   <>
                     <div className="grid gap-4 md:grid-cols-2">
@@ -481,7 +522,7 @@ function CheckoutPage() {
                     )}
 
                     <Button type="button" className="w-full" onClick={() => setStep(2)}>
-                      Go To Step #2
+                      Continue
                     </Button>
                     <p className="text-center text-xs text-muted-foreground">
                       We Respect Your Privacy & Information.
@@ -492,56 +533,91 @@ function CheckoutPage() {
                 {step === 2 && (
                   <>
                     <p className="text-sm text-muted-foreground">
-                      Please provide details for {attendees.length} attendee
-                      {attendees.length > 1 ? "s" : ""}.
+                      A few quick questions before we finalize your order.
                     </p>
-                    {attendees.map((a, i) => (
-                      <div key={i} className="space-y-3 rounded-lg border border-border p-4">
-                        <p className="text-sm font-semibold text-primary">Attendee {i + 1}</p>
-                        <div className="grid gap-3 md:grid-cols-2">
-                          <Field label="First name">
-                            <Input
-                              required
-                              value={a.firstName}
-                              onChange={(e) => {
-                                const next = [...attendees];
-                                next[i] = { ...a, firstName: e.target.value };
-                                setAttendees(next);
-                              }}
+                    <Field label="Which state is your agency located in?">
+                      <Input
+                        required
+                        placeholder="Enter your state"
+                        value={survey.agencyState}
+                        onChange={(e) =>
+                          setSurvey({ ...survey, agencyState: e.target.value })
+                        }
+                      />
+                    </Field>
+
+                    <div className="space-y-2">
+                      <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+                        Do you have a MOA?
+                      </Label>
+                      <div className="flex flex-col gap-2">
+                        {["Yes", "No"].map((opt) => (
+                          <label key={opt} className="flex items-center gap-2 text-sm">
+                            <input
+                              type="radio"
+                              name="hasMoa"
+                              className="accent-primary"
+                              checked={survey.hasMoa === opt}
+                              onChange={() => setSurvey({ ...survey, hasMoa: opt })}
                             />
-                          </Field>
-                          <Field label="Last name">
-                            <Input
-                              required
-                              value={a.lastName}
-                              onChange={(e) => {
-                                const next = [...attendees];
-                                next[i] = { ...a, lastName: e.target.value };
-                                setAttendees(next);
-                              }}
-                            />
-                          </Field>
-                        </div>
-                        <Field label="Email">
-                          <Input
-                            type="email"
-                            required
-                            value={a.email}
-                            onChange={(e) => {
-                              const next = [...attendees];
-                              next[i] = { ...a, email: e.target.value };
-                              setAttendees(next);
-                            }}
-                          />
-                        </Field>
+                            {opt}
+                          </label>
+                        ))}
                       </div>
-                    ))}
+                    </div>
+
+                    <Field label="Have you attended a Scale + Profit seminar before?">
+                      <Input
+                        required
+                        value={survey.attendedBefore}
+                        onChange={(e) =>
+                          setSurvey({ ...survey, attendedBefore: e.target.value })
+                        }
+                      />
+                    </Field>
+
+                    <div className="space-y-2">
+                      <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+                        Scale & Profit Shirt Size
+                      </Label>
+                      <div className="flex flex-col gap-2">
+                        {SHIRT_SIZES.map((size) => (
+                          <label key={size} className="flex items-center gap-2 text-sm">
+                            <input
+                              type="radio"
+                              name="shirtSize"
+                              className="accent-primary"
+                              checked={survey.shirtSize === size}
+                              onChange={() => setSurvey({ ...survey, shirtSize: size })}
+                            />
+                            {size}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+
+                    {surveyError && (
+                      <p className="text-xs text-destructive">{surveyError}</p>
+                    )}
+                    {submitError && (
+                      <p className="text-xs text-destructive">{submitError}</p>
+                    )}
                     <div className="flex gap-3">
-                      <Button type="button" variant="outline" onClick={() => setStep(1)}>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => setStep(1)}
+                        disabled={submitting}
+                      >
                         Back
                       </Button>
-                      <Button type="button" className="flex-1" onClick={() => setStep(3)}>
-                        Continue to Payment
+                      <Button
+                        type="button"
+                        className="flex-1"
+                        onClick={goToPaymentFromSurvey}
+                        disabled={submitting}
+                      >
+                        {submitting ? "Saving…" : "Continue to Payment"}
                       </Button>
                     </div>
                   </>
@@ -549,87 +625,29 @@ function CheckoutPage() {
 
                 {step === 3 && (
                   <>
-                    <div className="grid gap-4">
-                      <Field label="Name on card">
-                        <Input
-                          required
-                          value={billing.cardName}
-                          onChange={(e) => setBilling({ ...billing, cardName: e.target.value })}
-                        />
-                      </Field>
-                      <Field label="Card number">
-                        <Input
-                          required
-                          inputMode="numeric"
-                          placeholder="1234 1234 1234 1234"
-                          value={billing.cardNumber}
-                          onChange={(e) =>
-                            setBilling({ ...billing, cardNumber: e.target.value })
-                          }
-                        />
-                      </Field>
-                      <div className="grid gap-4 md:grid-cols-2">
-                        <Field label="Expiration">
-                          <Input
-                            required
-                            placeholder="MM / YY"
-                            value={billing.expiry}
-                            onChange={(e) => setBilling({ ...billing, expiry: e.target.value })}
-                          />
-                        </Field>
-                        <Field label="CVC">
-                          <Input
-                            required
-                            inputMode="numeric"
-                            placeholder="CVC"
-                            value={billing.cvc}
-                            onChange={(e) => setBilling({ ...billing, cvc: e.target.value })}
-                          />
-                        </Field>
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <h3 className="text-lg font-bold">Complete Your Payment</h3>
+                        <p className="text-sm text-muted-foreground">
+                          Your details are saved — finish securely below to confirm your seat.
+                        </p>
                       </div>
-                      <Field label="Billing address">
-                        <Input
-                          required
-                          value={billing.address}
-                          onChange={(e) => setBilling({ ...billing, address: e.target.value })}
-                        />
-                      </Field>
-                      <div className="grid gap-4 md:grid-cols-3">
-                        <Field label="City">
-                          <Input
-                            required
-                            value={billing.city}
-                            onChange={(e) => setBilling({ ...billing, city: e.target.value })}
-                          />
-                        </Field>
-                        <Field label="State">
-                          <Input
-                            required
-                            value={billing.state}
-                            onChange={(e) => setBilling({ ...billing, state: e.target.value })}
-                          />
-                        </Field>
-                        <Field label="ZIP">
-                          <Input
-                            required
-                            value={billing.zip}
-                            onChange={(e) => setBilling({ ...billing, zip: e.target.value })}
-                          />
-                        </Field>
-                      </div>
-                    </div>
-                    <div className="flex gap-3">
-                      <Button type="button" variant="outline" onClick={() => setStep(2)} disabled={submitting}>
+                      <Button type="button" variant="outline" size="sm" onClick={() => setStep(2)}>
                         Back
                       </Button>
-                      <Button type="submit" className="flex-1" disabled={submitting}>
-                        <Lock className="mr-2 h-4 w-4" />
-                        {submitting ? "Processing…" : `Pay $${total.toLocaleString()}.00`}
-                      </Button>
                     </div>
-                    {submitError && (
-                      <p className="text-center text-xs text-destructive">{submitError}</p>
-                    )}
+                    <div className="overflow-hidden rounded-lg bg-white">
+                      <iframe
+                        src={paymentSrc}
+                        id={`inline-${paymentFormId}`}
+                        title="Secure Payment"
+                        data-layout='{"id":"INLINE"}'
+                        data-form-id={paymentFormId}
+                        data-layout-iframe-id={`inline-${paymentFormId}`}
+                        className="w-full"
+                        style={{ minHeight: 720, border: "none" }}
+                      />
+                    </div>
                     <p className="flex items-center justify-center gap-2 text-center text-xs text-muted-foreground">
                       <ShieldCheck className="h-4 w-4 text-primary" /> 100% Secure & Safe Payments
                     </p>
@@ -647,7 +665,11 @@ function CheckoutPage() {
                   {isVip ? "VIP Experience" : "General Admission"}
                 </p>
                 <p className="mt-1 text-3xl font-black text-primary">
-                  ${isVip ? "1,600" : "997"}
+                  $
+                  {(isVip
+                    ? live.vip ?? 1600
+                    : gaOptions.find((g) => g.qty === 1)?.price ?? gaOptions[0].price
+                  ).toLocaleString()}
                 </p>
                 {isVip && (
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">
@@ -672,16 +694,6 @@ function CheckoutPage() {
                   <span>{selected.label}</span>
                   <span>${selected.price.toLocaleString()}.00</span>
                 </div>
-              </div>
-              <div className="mt-4 flex gap-2">
-                <Input
-                  placeholder="Coupon code"
-                  value={coupon}
-                  onChange={(e) => setCoupon(e.target.value)}
-                />
-                <Button type="button" variant="outline">
-                  Apply
-                </Button>
               </div>
               <div className="mt-4 flex items-center justify-between border-t border-border pt-4">
                 <span className="font-bold">Order Total</span>

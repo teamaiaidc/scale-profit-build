@@ -61,6 +61,25 @@
   --color-sidebar-ring: var(--sidebar-ring);
 }
 
+/* Light-toned sections: locally override theme tokens so all child components
+   (cards, muted text, borders) flip to a light/gray palette like the live site. */
+.section-light {
+  --background: oklch(0.97 0.004 90);
+  --foreground: oklch(0.24 0.01 250);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.24 0.01 250);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.24 0.01 250);
+  --secondary: oklch(0.94 0.004 90);
+  --secondary-foreground: oklch(0.24 0.01 250);
+  --muted: oklch(0.94 0.004 90);
+  --muted-foreground: oklch(0.5 0.01 250);
+  --border: oklch(0.9 0.004 250);
+  --input: oklch(0.9 0.004 250);
+  background-color: var(--background);
+  color: var(--foreground);
+}
+
 :root {
   --radius: 0.5rem;
   --background: oklch(0.22 0.005 250);

@@ -9,12 +9,17 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as ConfirmationRouteImport } from './routes/confirmation'
 import { Route as CheckoutRouteImport } from './routes/checkout'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as CheckoutSuccessRouteImport } from './routes/checkout.success'
 import { Route as ApiPublicHooksGhlRefreshRouteImport } from './routes/api/public/hooks/ghl-refresh'
 
+const ConfirmationRoute = ConfirmationRouteImport.update({
+  id: '/confirmation',
+  path: '/confirmation',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const CheckoutRoute = CheckoutRouteImport.update({
   id: '/checkout',
   path: '/checkout',
@@ -30,11 +35,6 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const CheckoutSuccessRoute = CheckoutSuccessRouteImport.update({
-  id: '/success',
-  path: '/success',
-  getParentRoute: () => CheckoutRoute,
-} as any)
 const ApiPublicHooksGhlRefreshRoute =
   ApiPublicHooksGhlRefreshRouteImport.update({
     id: '/api/public/hooks/ghl-refresh',
@@ -45,23 +45,23 @@ const ApiPublicHooksGhlRefreshRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
-  '/checkout': typeof CheckoutRouteWithChildren
-  '/checkout/success': typeof CheckoutSuccessRoute
+  '/checkout': typeof CheckoutRoute
+  '/confirmation': typeof ConfirmationRoute
   '/api/public/hooks/ghl-refresh': typeof ApiPublicHooksGhlRefreshRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
-  '/checkout': typeof CheckoutRouteWithChildren
-  '/checkout/success': typeof CheckoutSuccessRoute
+  '/checkout': typeof CheckoutRoute
+  '/confirmation': typeof ConfirmationRoute
   '/api/public/hooks/ghl-refresh': typeof ApiPublicHooksGhlRefreshRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
-  '/checkout': typeof CheckoutRouteWithChildren
-  '/checkout/success': typeof CheckoutSuccessRoute
+  '/checkout': typeof CheckoutRoute
+  '/confirmation': typeof ConfirmationRoute
   '/api/public/hooks/ghl-refresh': typeof ApiPublicHooksGhlRefreshRoute
 }
 export interface FileRouteTypes {
@@ -70,33 +70,41 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/checkout'
-    | '/checkout/success'
+    | '/confirmation'
     | '/api/public/hooks/ghl-refresh'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/admin'
     | '/checkout'
-    | '/checkout/success'
+    | '/confirmation'
     | '/api/public/hooks/ghl-refresh'
   id:
     | '__root__'
     | '/'
     | '/admin'
     | '/checkout'
-    | '/checkout/success'
+    | '/confirmation'
     | '/api/public/hooks/ghl-refresh'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRoute
-  CheckoutRoute: typeof CheckoutRouteWithChildren
+  CheckoutRoute: typeof CheckoutRoute
+  ConfirmationRoute: typeof ConfirmationRoute
   ApiPublicHooksGhlRefreshRoute: typeof ApiPublicHooksGhlRefreshRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/confirmation': {
+      id: '/confirmation'
+      path: '/confirmation'
+      fullPath: '/confirmation'
+      preLoaderRoute: typeof ConfirmationRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/checkout': {
       id: '/checkout'
       path: '/checkout'
@@ -118,13 +126,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/checkout/success': {
-      id: '/checkout/success'
-      path: '/success'
-      fullPath: '/checkout/success'
-      preLoaderRoute: typeof CheckoutSuccessRouteImport
-      parentRoute: typeof CheckoutRoute
-    }
     '/api/public/hooks/ghl-refresh': {
       id: '/api/public/hooks/ghl-refresh'
       path: '/api/public/hooks/ghl-refresh'
@@ -135,22 +136,11 @@ declare module '@tanstack/react-router' {
   }
 }
 
-interface CheckoutRouteChildren {
-  CheckoutSuccessRoute: typeof CheckoutSuccessRoute
-}
-
-const CheckoutRouteChildren: CheckoutRouteChildren = {
-  CheckoutSuccessRoute: CheckoutSuccessRoute,
-}
-
-const CheckoutRouteWithChildren = CheckoutRoute._addFileChildren(
-  CheckoutRouteChildren,
-)
-
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
-  CheckoutRoute: CheckoutRouteWithChildren,
+  CheckoutRoute: CheckoutRoute,
+  ConfirmationRoute: ConfirmationRoute,
   ApiPublicHooksGhlRefreshRoute: ApiPublicHooksGhlRefreshRoute,
 }
 export const routeTree = rootRouteImport

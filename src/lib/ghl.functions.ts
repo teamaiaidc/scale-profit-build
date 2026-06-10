@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import { DEFAULT_EVENTS } from "./events";
 
 const GHL_LOCATION_ID = "mVdYbXfJcF10Y7anuoNt";
 const GHL_BASE = "https://services.leadconnectorhq.com";
@@ -9,6 +10,13 @@ const attendeeSchema = z.object({
   firstName: z.string().min(1).max(100),
   lastName: z.string().min(1).max(100),
   email: z.string().email().max(200),
+});
+
+const surveySchema = z.object({
+  agencyState: z.string().max(100),
+  hasMoa: z.string().max(10),
+  attendedBefore: z.string().max(500),
+  shirtSize: z.string().max(20),
 });
 
 const inputSchema = z.object({
@@ -21,6 +29,7 @@ const inputSchema = z.object({
   quantity: z.number().int().min(1).max(20),
   amount: z.number().min(0).max(1000000),
   attendees: z.array(attendeeSchema).min(0).max(20).optional(),
+  survey: surveySchema.optional(),
 });
 
 export type GhlCheckoutInput = z.infer<typeof inputSchema>;
@@ -78,6 +87,14 @@ export const submitCheckoutToGhl = createServerFn({ method: "POST" })
           { key: "ticket_tier", field_value: tierLabel },
           { key: "ticket_quantity", field_value: String(data.quantity) },
           { key: "order_amount", field_value: String(data.amount) },
+          ...(data.survey
+            ? [
+                { key: "agency_state", field_value: data.survey.agencyState },
+                { key: "has_moa", field_value: data.survey.hasMoa },
+                { key: "attended_before", field_value: data.survey.attendedBefore },
+                { key: "shirt_size", field_value: data.survey.shirtSize },
+              ]
+            : []),
         ],
       }),
     })) as { contact?: { id?: string }; id?: string };
@@ -267,5 +284,148 @@ export const pushGhlContactUpdate = createServerFn({ method: "POST" })
           } as GhlContactSnapshot)
         : null,
     };
+  });
+
+// ============== Products & pricing ==============
+
+export type GhlPrice = {
+  id: string;
+  name: string;
+  amount: number; // major units (e.g. dollars)
+  currency: string;
+  type: string; // "one_time" | "recurring"
+};
+
+export type GhlProduct = {
+  id: string;
+  name: string;
+  description: string;
+  prices: GhlPrice[];
+};
+
+type RawProduct = { _id?: string; id?: string; name?: string; description?: string };
+type RawPrice = {
+  _id?: string;
+  id?: string;
+  name?: string;
+  amount?: number;
+  currency?: string;
+  type?: string;
+};
+
+// Fetch this location's products and their prices so the UI can render live
+// pricing instead of hardcoded values. Best-effort: returns [] on any failure
+// so the checkout always falls back to its built-in prices.
+// Only these products feed the checkout, so we fetch prices for them alone
+// (the location has many products and per-product price calls hit rate limits).
+const RELEVANT_PRODUCT = /vip|general|admission|\bga\b/i;
+
+// Cache results so repeated page loads don't re-hit GHL (tight rate limits).
+let productsCache: { at: number; data: GhlProduct[] } | null = null;
+const PRODUCTS_TTL_MS = 5 * 60 * 1000;
+
+export const listGhlProducts = createServerFn({ method: "GET" }).handler(
+  async (): Promise<{ products: GhlProduct[] }> => {
+    if (productsCache && Date.now() - productsCache.at < PRODUCTS_TTL_MS) {
+      return { products: productsCache.data };
+    }
+    try {
+      const res = (await ghlFetch(
+        `/products/?locationId=${GHL_LOCATION_ID}&limit=100`,
+        { method: "GET" },
+      )) as { products?: RawProduct[] };
+      const raw = (res.products ?? []).filter((p) =>
+        RELEVANT_PRODUCT.test(p.name ?? ""),
+      );
+
+      const products = await Promise.all(
+        raw.map(async (p): Promise<GhlProduct> => {
+          const productId = p._id ?? p.id ?? "";
+          let prices: GhlPrice[] = [];
+          try {
+            const pr = (await ghlFetch(
+              `/products/${productId}/price?locationId=${GHL_LOCATION_ID}&limit=100`,
+              { method: "GET" },
+            )) as { prices?: RawPrice[] };
+            prices = (pr.prices ?? []).map((x) => ({
+              id: x._id ?? x.id ?? "",
+              name: x.name ?? "",
+              // GHL returns price amounts in major units already for these endpoints.
+              amount: typeof x.amount === "number" ? x.amount : 0,
+              currency: x.currency ?? "USD",
+              type: x.type ?? "one_time",
+            }));
+          } catch (err) {
+            console.warn(
+              `GHL prices fetch failed for product ${productId}:`,
+              (err as Error).message,
+            );
+          }
+          return {
+            id: productId,
+            name: p.name ?? "",
+            description: p.description ?? "",
+            prices,
+          };
+        }),
+      );
+
+      productsCache = { at: Date.now(), data: products };
+      return { products };
+    } catch (err) {
+      console.warn("GHL products fetch failed:", (err as Error).message);
+      // Serve the last good data (even if stale) rather than dropping prices.
+      if (productsCache) return { products: productsCache.data };
+      return { products: [] };
+    }
+  },
+);
+
+// ============== Post-purchase attendees ==============
+
+// Each ticket becomes its own attendee contact, collected on the confirmation
+// page after payment (when the real ticket count is known).
+const addAttendeesSchema = z.object({
+  city: z.string().min(1).max(50),
+  tier: z.enum(["ga", "vip"]),
+  // ISO end date (YYYY-MM-DD); falls back to the slug's default if omitted.
+  endDate: z.string().max(20).optional(),
+  attendees: z.array(attendeeSchema).min(1).max(20),
+});
+
+export const addAttendeesToGhl = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) => addAttendeesSchema.parse(d))
+  .handler(async ({ data }) => {
+    // Event tag: s&p-{slug}-{endDate} (e.g. s&p-boston-2026-06-03), uniquely
+    // identifying which event/date the ticket was purchased for.
+    const endDate =
+      data.endDate || DEFAULT_EVENTS.find((e) => e.slug === data.city)?.end_date || "";
+    const eventTag = endDate ? `s&p-${data.city}-${endDate}` : `s&p-${data.city}`;
+    const tags = [
+      eventTag,
+      "scale-profit-seminar",
+      `scale-profit-${data.tier}`,
+      "scale-profit-attendee",
+    ];
+    const results = await Promise.allSettled(
+      data.attendees
+        .filter((a) => a.email)
+        .map((a) =>
+          ghlFetch("/contacts/upsert", {
+            method: "POST",
+            body: JSON.stringify({
+              locationId: GHL_LOCATION_ID,
+              firstName: a.firstName,
+              lastName: a.lastName,
+              email: a.email,
+              tags,
+              source: "Scale & Profit Seminar Attendee",
+            }),
+          }),
+        ),
+    );
+    const saved = results.filter((r) => r.status === "fulfilled").length;
+    const failed = results.length - saved;
+    return { ok: failed === 0, saved, failed };
   });
 

@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, Calendar, MapPin, Clock, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -7,15 +7,13 @@ import { listEvents } from "@/lib/events.functions";
 import { getTodayISO, splitEvents } from "@/lib/events";
 import { loadStoredEvents } from "@/lib/events.store";
 import logo from "@/assets/hero-banner.webp";
+import coachesHero from "@/assets/hero-coaches.jpg";
 import davidImg from "@/assets/david-peterson.webp";
 import alexImg from "@/assets/alex-shattuck.webp";
 import toolkitSystems from "@/assets/toolkit-systems.webp";
 import toolkitTeams from "@/assets/toolkit-teams.webp";
 import toolkitTime from "@/assets/toolkit-time.webp";
 import toolkitProfit from "@/assets/toolkit-profit.webp";
-import gameplan1 from "@/assets/gameplan-1.webp";
-import gameplan2 from "@/assets/gameplan-2.webp";
-import gameplan3 from "@/assets/gameplan-3.webp";
 import sponsorAgero from "@/assets/sponsor.webp";
 
 export const Route = createFileRoute("/")({
@@ -136,15 +134,26 @@ const tiers = [
 function Section({
   children,
   className = "",
+  id,
+  tone = "dark",
 }: {
   children: React.ReactNode;
   className?: string;
+  id?: string;
+  tone?: "dark" | "light";
 }) {
   return (
-    <section className={`px-6 py-20 md:py-28 ${className}`}>
+    <section
+      id={id}
+      className={`px-6 py-20 md:py-28 ${tone === "light" ? "section-light" : ""} ${className}`}
+    >
       <div className="mx-auto max-w-6xl">{children}</div>
     </section>
   );
+}
+
+function scrollToOffers() {
+  document.getElementById("offers")?.scrollIntoView({ behavior: "smooth" });
 }
 
 function Index() {
@@ -155,6 +164,18 @@ function Index() {
   useEffect(() => {
     setAllEvents(loadStoredEvents(loaderEvents));
   }, [loaderEvents]);
+  // When an event is expanded (via user click), scroll its ticket tiers into view.
+  const didMount = useRef(false);
+  useEffect(() => {
+    if (!didMount.current) {
+      didMount.current = true;
+      return;
+    }
+    if (openEvent === null) return;
+    document
+      .getElementById(`event-tiers-${openEvent}`)
+      ?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [openEvent]);
   // Show only upcoming events (soonest first); fall back to all if none are upcoming.
   const { upcoming } = splitEvents(allEvents, getTodayISO());
   const events = upcoming.length > 0 ? upcoming : allEvents;
@@ -172,15 +193,17 @@ function Index() {
               className="h-10 w-auto"
             />
           </Link>
-          <Button asChild>
-            <Link to="/checkout" search={{ city: "boston", tier: "ga" }}>Sign up Now!</Link>
-          </Button>
+          <Button onClick={scrollToOffers}>Sign up Now!</Button>
         </div>
       </header>
 
       {/* Hero */}
       <section className="relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-b from-background via-card/30 to-background" />
+        <div
+          className="absolute inset-0 bg-cover bg-center"
+          style={{ backgroundImage: `url(${coachesHero})` }}
+        />
+        <div className="absolute inset-0 bg-gradient-to-b from-background/90 via-background/80 to-background" />
         <div className="relative mx-auto max-w-4xl px-6 py-24 text-center md:py-32">
           <img
             src={logo}
@@ -198,14 +221,14 @@ function Index() {
           <p className="mx-auto mt-6 max-w-2xl text-lg text-muted-foreground md:text-xl">
             Get the blueprint for More Profit, Better Teams, and Real Freedom.
           </p>
-          <Button asChild size="lg" className="mt-8 px-10 py-6 text-base">
-            <Link to="/checkout" search={{ city: "boston", tier: "ga" }}>Sign up Today!</Link>
+          <Button size="lg" className="mt-8 px-10 py-6 text-base" onClick={scrollToOffers}>
+            Sign up Today!
           </Button>
         </div>
       </section>
 
       {/* Three pillars */}
-      <Section className="border-y border-border">
+      <Section tone="light" className="border-y border-border">
         <div className="grid gap-8 md:grid-cols-3">
           {[
             ["Maximize Profit", "Understand & control the levers of true, sustainable profitability."],
@@ -237,14 +260,14 @@ function Index() {
             Stop trying to navigate scaling your agency alone.{" "}
             <span className="text-primary">There's a smarter way.</span>
           </p>
-          <Button asChild size="lg" className="mt-6">
-            <Link to="/checkout" search={{ city: "boston", tier: "ga" }}>Get Your Ticket!</Link>
+          <Button size="lg" className="mt-6" onClick={scrollToOffers}>
+            Get Your Ticket!
           </Button>
         </div>
       </Section>
 
       {/* Coaches */}
-      <Section className="bg-card/40">
+      <Section tone="light">
         <h2 className="text-center text-3xl font-bold md:text-5xl">
           Your Coaches: From the Trenches to the Top
         </h2>
@@ -323,15 +346,17 @@ function Index() {
           execution, and real-world experience in building profitable, scalable agencies.
         </p>
         <div className="mt-8 text-center">
-          <Button asChild size="lg">
-            <Link to="/checkout" search={{ city: "boston", tier: "ga" }}>Sign Me Up!</Link>
+          <Button size="lg" onClick={scrollToOffers}>
+            Sign Me Up!
           </Button>
         </div>
       </Section>
 
       {/* Imagine */}
       <Section>
-        <h2 className="text-3xl font-bold md:text-5xl">Imagine Your Agency Transformed</h2>
+        <h2 className="text-center text-3xl font-bold md:text-5xl">
+          Imagine Your Agency Transformed
+        </h2>
         <div className="mt-10 grid gap-4 md:grid-cols-2">
           {[
             "Attracting and keeping top talent because you've built a destination culture.",
@@ -351,7 +376,7 @@ function Index() {
       </Section>
 
       {/* Toolkit */}
-      <Section className="bg-card/40">
+      <Section tone="light">
         <h2 className="text-center text-3xl font-bold md:text-5xl">
           What You'll Walk Away With — The CEO Toolkit
         </h2>
@@ -368,7 +393,7 @@ function Index() {
 
       {/* Event details + agenda */}
       <Section>
-        <h2 className="text-3xl font-bold md:text-5xl">Event Details</h2>
+        <h2 className="text-center text-3xl font-bold md:text-5xl">Event Details</h2>
         <div className="mt-6 grid gap-4 md:grid-cols-4">
           <Card className="p-5">
             <MapPin className="h-5 w-5 text-primary" />
@@ -421,7 +446,7 @@ function Index() {
       </Section>
 
       {/* Events / tickets */}
-      <Section className="bg-card/40">
+      <Section id="offers" tone="light">
         <h2 className="text-center text-3xl font-bold md:text-5xl">
           Choose Your Scale & Profit Experience
         </h2>
@@ -448,11 +473,14 @@ function Index() {
               </button>
 
               {openEvent === i && (
-                <div className="grid gap-6 border-t border-border bg-background/40 p-6 md:grid-cols-2">
+                <div
+                  id={`event-tiers-${i}`}
+                  className="grid gap-6 border-t border-border bg-background/40 p-6 md:grid-cols-2"
+                >
                   {tiers.map((tier) => (
                     <Card
                       key={tier.name}
-                      className={`p-6 ${tier.featured ? "border-primary" : ""}`}
+                      className={`flex h-full flex-col p-6 ${tier.featured ? "border-primary" : ""}`}
                     >
                       <h4 className="text-xl font-bold">{tier.name}</h4>
                       <p className="mt-2 text-3xl font-black text-primary">{tier.price}</p>
@@ -461,7 +489,7 @@ function Index() {
                           {tier.note}
                         </p>
                       )}
-                      <ul className="mt-4 space-y-2 text-sm">
+                      <ul className="mt-4 flex-1 space-y-2 text-sm">
                         {tier.perks.map((p) => (
                           <li key={p} className="flex gap-2">
                             <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
@@ -496,23 +524,20 @@ function Index() {
         </h2>
         <div className="mt-12 grid gap-6 md:grid-cols-3">
           {[
-            [gameplan1, "1", "Attend the Seminar", "Register and join us at our upcoming seminar."],
+            ["1", "Attend the Seminar", "Register and join us at our upcoming seminar."],
             [
-              gameplan2,
               "2",
               "Implement Our Proven Systems",
               "Apply tested methods for recruiting, onboarding, culture, marketing, accountability, structure, and profit.",
             ],
             [
-              gameplan3,
               "3",
               "Scale Confidently & Lead Like a CEO",
               "Build a profitable, sustainable agency that gives you freedom.",
             ],
-          ].map(([icon, n, t, d]) => (
+          ].map(([n, t, d]) => (
             <Card key={n} className="p-8 text-center">
-              <img src={icon} alt="" className="mx-auto h-16 w-16 object-contain" />
-              <div className="mx-auto mt-4 flex h-10 w-10 items-center justify-center rounded-full bg-primary text-lg font-black text-primary-foreground">
+              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-primary text-2xl font-black text-primary-foreground">
                 {n}
               </div>
               <h3 className="mt-5 text-xl font-bold">{t}</h3>
@@ -521,14 +546,14 @@ function Index() {
           ))}
         </div>
         <div className="mt-12 text-center">
-          <Button asChild size="lg">
-            <Link to="/checkout" search={{ city: "boston", tier: "ga" }}>Get Your Ticket</Link>
+          <Button size="lg" onClick={scrollToOffers}>
+            Get Your Ticket
           </Button>
         </div>
       </Section>
 
       {/* Sponsors */}
-      <Section>
+      <Section tone="light">
         <h2 className="text-center text-3xl font-bold md:text-5xl">
           Thank You For Being a Scale & Profit Sponsor
         </h2>
@@ -542,7 +567,7 @@ function Index() {
       </Section>
 
       {/* Closing CTA */}
-      <Section className="bg-card/40">
+      <Section>
         <div className="mx-auto max-w-3xl text-center">
           <h2 className="text-3xl font-bold md:text-5xl">
             You Deserve a Business That Works for You
@@ -557,8 +582,8 @@ function Index() {
             where we share the exact frameworks, strategies, and tools we've used to build
             multiple high-performing agencies.
           </p>
-          <Button asChild size="lg" className="mt-8">
-            <Link to="/checkout" search={{ city: "boston", tier: "ga" }}>Reserve Your Seat</Link>
+          <Button size="lg" className="mt-8" onClick={scrollToOffers}>
+            Reserve Your Seat
           </Button>
         </div>
       </Section>
