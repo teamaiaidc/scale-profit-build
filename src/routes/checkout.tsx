@@ -176,7 +176,9 @@ function CheckoutPage() {
     document.body.appendChild(s);
   }, []);
 
+  const navigate = useNavigate();
   const [step, setStep] = useState<1 | 2 | 3>(1);
+
   // Quantity is now chosen inside the GHL payment form; we always treat this
   // app's order as a single base ticket for the summary/contact record.
   const selectedQty = 1;
