@@ -343,7 +343,7 @@ function CheckoutPage() {
             date: cityInfo.date,
             venue: cityInfo.venue,
             address: cityInfo.address,
-            time: events.find((e) => e.slug === (city ?? "boston"))?.time,
+            time: events.find((e: EventRow) => e.slug === (city ?? "boston"))?.time,
           },
         },
       });
