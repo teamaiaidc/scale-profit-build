@@ -263,7 +263,7 @@ function CheckoutPage() {
   const submitToGhl = useServerFn(submitCheckoutToGhl);
   const lookupGhl = useServerFn(lookupGhlContactByEmail);
   const pushGhl = useServerFn(pushGhlContactUpdate);
-  const [submitting, setSubmitting] = useState(false);
+  const submitting = false;
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   // ===== GHL 2-way sync =====
