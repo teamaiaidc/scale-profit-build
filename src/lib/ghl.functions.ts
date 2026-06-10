@@ -110,8 +110,10 @@ export const submitCheckoutToGhl = createServerFn({ method: "POST" })
       `scale-profit-${data.city}-${data.tier}`,
     ];
 
-    // 1. Upsert primary buyer contact
-    const upsert = (await ghlFetch("/contacts/upsert", {
+    // 1. Upsert primary buyer contact + fetch pipelines in parallel
+    //    (pipelines lookup doesn't depend on the contact, so we save a
+    //    full round-trip by not waiting for the upsert first).
+    const upsertPromise = ghlFetch("/contacts/upsert", {
       method: "POST",
       body: JSON.stringify({
         locationId: GHL_LOCATION_ID,
@@ -138,7 +140,17 @@ export const submitCheckoutToGhl = createServerFn({ method: "POST" })
             : []),
         ],
       }),
-    })) as { contact?: { id?: string }; id?: string };
+    }) as Promise<{ contact?: { id?: string }; id?: string }>;
+
+    const pipelinesPromise = ghlFetch(
+      `/opportunities/pipelines?locationId=${GHL_LOCATION_ID}`,
+      { method: "GET" },
+    ).catch((err) => {
+      console.warn("GHL pipelines fetch failed:", (err as Error).message);
+      return null;
+    }) as Promise<{ pipelines?: Array<{ id: string; stages?: Array<{ id: string }> }> } | null>;
+
+    const [upsert, pipelines] = await Promise.all([upsertPromise, pipelinesPromise]);
 
     const contactId = (upsert.contact && upsert.contact.id) || upsert.id || undefined;
 
@@ -163,14 +175,10 @@ export const submitCheckoutToGhl = createServerFn({ method: "POST" })
       );
     }
 
-    // 3. Try to create an opportunity in the first available pipeline (best-effort)
+    // 3. Create an opportunity in the first available pipeline (best-effort)
     let opportunityId: string | undefined;
-    if (contactId) {
+    if (contactId && pipelines) {
       try {
-        const pipelines = (await ghlFetch(
-          `/opportunities/pipelines?locationId=${GHL_LOCATION_ID}`,
-          { method: "GET" },
-        )) as { pipelines?: Array<{ id: string; stages?: Array<{ id: string }> }> };
         const pipeline = pipelines.pipelines?.[0];
         const stageId = pipeline?.stages?.[0]?.id;
         if (pipeline && stageId) {
