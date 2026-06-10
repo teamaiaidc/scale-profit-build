@@ -4,7 +4,7 @@ import { Check, Calendar, MapPin, Clock, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { listEvents } from "@/lib/events.functions";
-import { getTodayISO, splitEvents } from "@/lib/events";
+import { getTodayISO, splitEvents, type EventRow } from "@/lib/events";
 import { loadStoredEvents } from "@/lib/events.store";
 import logo from "@/assets/hero-banner.webp";
 import coachesHero from "@/assets/hero-coaches.jpg";
@@ -456,7 +456,7 @@ function Index() {
         </p>
 
         <div className="mt-10 space-y-4">
-          {events.map((e, i) => (
+          {events.map((e: EventRow, i: number) => (
             <Card key={e.slug} className="overflow-hidden">
               <button
                 onClick={() => setOpenEvent(openEvent === i ? null : i)}
