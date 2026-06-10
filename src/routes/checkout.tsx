@@ -11,6 +11,8 @@ import {
   lookupGhlContactByEmail,
   pushGhlContactUpdate,
   submitCheckoutToGhl,
+  type GhlProduct,
+  type GhlPrice,
 } from "@/lib/ghl.functions";
 import { listEvents } from "@/lib/events.functions";
 import { loadStoredEvents } from "@/lib/events.store";
@@ -103,13 +105,15 @@ function CheckoutPage() {
 
   // Live pricing pulled from the two GHL products (fall back to built-in values).
   const live = useMemo(() => {
+    const products = ghlProducts as GhlProduct[];
     const findProduct = (matcher: RegExp) =>
-      ghlProducts.find((p) => matcher.test(p.name));
+      products.find((p: GhlProduct) => matcher.test(p.name));
 
     // VIP: single one-time price.
     const vipProduct = findProduct(/vip/i);
     const vipPrice =
-      vipProduct?.prices.find((pr) => pr.type === "one_time") ?? vipProduct?.prices[0];
+      vipProduct?.prices.find((pr: GhlPrice) => pr.type === "one_time") ??
+      vipProduct?.prices[0];
     const vip = vipPrice && vipPrice.amount > 0 ? vipPrice.amount : null;
 
     // GA: build the full quantity table from the product's prices, deriving the
@@ -118,7 +122,7 @@ function CheckoutPage() {
     let gaTiers: { qty: number; label: string; price: number }[] | null = null;
     if (gaProduct && gaProduct.prices.length > 0) {
       const rows = gaProduct.prices
-        .map((pr) => {
+        .map((pr: GhlPrice) => {
           const qty = Number(pr.name.match(/(\d+)\s*ticket/i)?.[1] ?? 0);
           return qty > 0 && pr.amount > 0
             ? {
@@ -131,8 +135,13 @@ function CheckoutPage() {
               }
             : null;
         })
-        .filter((r): r is { qty: number; label: string; price: number } => r !== null)
-        .sort((a, b) => a.qty - b.qty);
+        .filter(
+          (r: { qty: number; label: string; price: number } | null): r is { qty: number; label: string; price: number } =>
+            r !== null,
+        )
+        .sort(
+          (a: { qty: number }, b: { qty: number }) => a.qty - b.qty,
+        );
       if (rows.length > 0) gaTiers = rows;
     }
 
