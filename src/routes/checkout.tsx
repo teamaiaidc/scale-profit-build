@@ -726,16 +726,12 @@ function SyncIndicator({
   error: string | null;
   hasContact: boolean;
 }) {
-  if (status === "idle") return null;
+  if (status === "idle" || status === "synced") return null;
   if (status === "syncing")
-    return <p className="mt-1 text-xs text-muted-foreground">Syncing with GHL…</p>;
+    return <p className="mt-1 text-xs text-muted-foreground">Syncing…</p>;
   if (status === "error")
     return <p className="mt-1 text-xs text-destructive">Sync failed{error ? `: ${error}` : ""}</p>;
-  return (
-    <p className="mt-1 text-xs text-primary">
-      {hasContact
-        ? "✓ Synced from GHL contact"
-        : "✓ No existing GHL contact — new one will be created"}
-    </p>
-  );
+  return null;
+  // hasContact intentionally unused
+  void hasContact;
 }
