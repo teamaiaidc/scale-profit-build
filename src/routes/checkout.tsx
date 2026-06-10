@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, RefreshCw, ShieldCheck, ArrowLeft } from "lucide-react";
@@ -176,7 +176,9 @@ function CheckoutPage() {
     document.body.appendChild(s);
   }, []);
 
+  const navigate = useNavigate();
   const [step, setStep] = useState<1 | 2 | 3>(1);
+
   // Quantity is now chosen inside the GHL payment form; we always treat this
   // app's order as a single base ticket for the summary/contact record.
   const selectedQty = 1;
@@ -222,6 +224,41 @@ function CheckoutPage() {
     for (const [k, v] of Object.entries(params)) if (v) u.searchParams.set(k, v);
     return u.toString();
   }, [paymentFormUrl, city, cityInfo.name, cityInfo.date, isVip, yourInfo]);
+
+  // When the embedded GHL payment form reports a successful submission, take
+  // the buyer straight to our confirmation/loop page instead of GHL's default
+  // thank-you screen. GHL's form_embed.js posts messages from its origin when
+  // the form is submitted — match loosely to cover variants.
+  useEffect(() => {
+    if (step !== 3) return;
+    const onMessage = (e: MessageEvent) => {
+      try {
+        const origin = e.origin || "";
+        if (!/aiaimastermind\.com|leadconnectorhq\.com|msgsndr\.com/i.test(origin)) return;
+        const raw = e.data;
+        const str =
+          typeof raw === "string" ? raw : raw && typeof raw === "object" ? JSON.stringify(raw) : "";
+        if (!/form[_-]?submit|submitted|success|payment[_-]?success/i.test(str)) return;
+        navigate({
+          to: "/confirmation",
+          search: {
+            city: city ?? "boston",
+            tier: isVip ? "vip" : "ga",
+            qty: 1,
+            email: yourInfo.email || undefined,
+            firstName: yourInfo.firstName || undefined,
+            lastName: yourInfo.lastName || undefined,
+          },
+        });
+      } catch {
+        /* ignore */
+      }
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [step, navigate, city, isVip, yourInfo]);
+
+
 
   const submitToGhl = useServerFn(submitCheckoutToGhl);
   const lookupGhl = useServerFn(lookupGhlContactByEmail);
