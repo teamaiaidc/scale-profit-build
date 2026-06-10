@@ -720,18 +720,15 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 function SyncIndicator({
   status,
   error,
-  hasContact,
 }: {
   status: "idle" | "syncing" | "synced" | "error";
   error: string | null;
   hasContact: boolean;
 }) {
-  if (status === "idle" || status === "synced") return null;
   if (status === "syncing")
     return <p className="mt-1 text-xs text-muted-foreground">Syncing…</p>;
   if (status === "error")
     return <p className="mt-1 text-xs text-destructive">Sync failed{error ? `: ${error}` : ""}</p>;
   return null;
-  // hasContact intentionally unused
-  void hasContact;
 }
+
