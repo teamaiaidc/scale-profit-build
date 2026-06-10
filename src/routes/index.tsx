@@ -145,7 +145,7 @@ function Section({
   return (
     <section
       id={id}
-      className={`px-6 py-20 md:py-28 ${tone === "light" ? "section-light" : ""} ${className}`}
+      className={`px-6 py-20 md:py-28 ${tone === "light" ? "bg-card/40" : ""} ${className}`}
     >
       <div className="mx-auto max-w-6xl">{children}</div>
     </section>
