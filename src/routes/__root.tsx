@@ -72,20 +72,18 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Scale & Profit Seminar" },
-      {
-        name: "description",
-        content:
-          "Join David Peterson & Alex Shattuck for the Scale & Profit Seminar — the blueprint for more profit, better teams, and real freedom.",
-      },
-      { name: "author", content: "Scale & Profit" },
-      { property: "og:title", content: "Scale & Profit Seminar" },
-      {
-        property: "og:description",
-        content: "Get the blueprint for More Profit, Better Teams, and Real Freedom.",
-      },
+      { title: "Lovable App" },
+      { name: "description", content: "This application replicates the Scale and Profit seminar website, featuring event details and a seamless checkout process." },
+      { name: "author", content: "Lovable" },
+      { property: "og:title", content: "Lovable App" },
+      { property: "og:description", content: "This application replicates the Scale and Profit seminar website, featuring event details and a seamless checkout process." },
       { property: "og:type", content: "website" },
-      { name: "twitter:card", content: "summary_large_image" },
+      { name: "twitter:card", content: "summary" },
+      { name: "twitter:site", content: "@Lovable" },
+      { name: "twitter:title", content: "Lovable App" },
+      { name: "twitter:description", content: "This application replicates the Scale and Profit seminar website, featuring event details and a seamless checkout process." },
+      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/11dd174a-10d6-4256-9c51-5bdf9c3f0513/id-preview-7584a5a0--5112ad8a-ebfd-41fa-9f67-f593d2a08440.lovable.app-1781097810344.png" },
+      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/11dd174a-10d6-4256-9c51-5bdf9c3f0513/id-preview-7584a5a0--5112ad8a-ebfd-41fa-9f67-f593d2a08440.lovable.app-1781097810344.png" },
     ],
     links: [
       {
