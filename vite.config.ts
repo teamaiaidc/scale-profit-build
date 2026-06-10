@@ -12,4 +12,10 @@ export default defineConfig({
   tanstackStart: {
     server: { entry: "server" },
   },
+  // Build a Vercel-compatible output (.vercel/output, Build Output API v3) instead of
+  // the default Cloudflare Workers bundle. Setting `nitro` also force-enables the deploy
+  // plugin, which Lovable otherwise skips when not running inside its own sandbox.
+  nitro: {
+    preset: "vercel",
+  },
 });
