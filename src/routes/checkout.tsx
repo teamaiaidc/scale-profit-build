@@ -16,6 +16,7 @@ import {
 } from "@/lib/ghl.functions";
 import { listEvents } from "@/lib/events.functions";
 import { loadStoredEvents } from "@/lib/events.store";
+import type { EventRow } from "@/lib/events";
 import logo from "@/assets/hero-banner.webp";
 
 type Search = { city?: string; tier?: string; email?: string };
