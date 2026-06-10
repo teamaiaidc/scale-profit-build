@@ -456,7 +456,7 @@ function Index() {
         </p>
 
         <div className="mt-10 space-y-4">
-          {events.map((e, i) => (
+          {events.map((e: EventRow, i: number) => (
             <Card key={e.slug} className="overflow-hidden">
               <button
                 onClick={() => setOpenEvent(openEvent === i ? null : i)}
