@@ -16,6 +16,7 @@ import {
 } from "@/lib/ghl.functions";
 import { listEvents } from "@/lib/events.functions";
 import { loadStoredEvents } from "@/lib/events.store";
+import type { EventRow } from "@/lib/events";
 import logo from "@/assets/hero-banner.webp";
 
 type Search = { city?: string; tier?: string; email?: string };
@@ -343,7 +344,7 @@ function CheckoutPage() {
             date: cityInfo.date,
             venue: cityInfo.venue,
             address: cityInfo.address,
-            time: events.find((e) => e.slug === (city ?? "boston"))?.time,
+            time: events.find((e: EventRow) => e.slug === (city ?? "boston"))?.time,
           },
         },
       });
