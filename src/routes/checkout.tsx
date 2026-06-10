@@ -18,7 +18,6 @@ import { listEvents } from "@/lib/events.functions";
 import { loadStoredEvents } from "@/lib/events.store";
 import logo from "@/assets/hero-banner.webp";
 
-
 type Search = { city?: string; tier?: string; email?: string };
 
 export const Route = createFileRoute("/checkout")({
@@ -106,14 +105,12 @@ function CheckoutPage() {
   // Live pricing pulled from the two GHL products (fall back to built-in values).
   const live = useMemo(() => {
     const products = ghlProducts as GhlProduct[];
-    const findProduct = (matcher: RegExp) =>
-      products.find((p: GhlProduct) => matcher.test(p.name));
+    const findProduct = (matcher: RegExp) => products.find((p: GhlProduct) => matcher.test(p.name));
 
     // VIP: single one-time price.
     const vipProduct = findProduct(/vip/i);
     const vipPrice =
-      vipProduct?.prices.find((pr: GhlPrice) => pr.type === "one_time") ??
-      vipProduct?.prices[0];
+      vipProduct?.prices.find((pr: GhlPrice) => pr.type === "one_time") ?? vipProduct?.prices[0];
     const vip = vipPrice && vipPrice.amount > 0 ? vipPrice.amount : null;
 
     // GA: build the full quantity table from the product's prices, deriving the
@@ -136,12 +133,11 @@ function CheckoutPage() {
             : null;
         })
         .filter(
-          (r: { qty: number; label: string; price: number } | null): r is { qty: number; label: string; price: number } =>
-            r !== null,
+          (
+            r: { qty: number; label: string; price: number } | null,
+          ): r is { qty: number; label: string; price: number } => r !== null,
         )
-        .sort(
-          (a: { qty: number }, b: { qty: number }) => a.qty - b.qty,
-        );
+        .sort((a: { qty: number }, b: { qty: number }) => a.qty - b.qty);
       if (rows.length > 0) gaTiers = rows;
     }
 
@@ -200,10 +196,8 @@ function CheckoutPage() {
     countryCode: "+1",
   });
 
-
   const selected = useMemo(() => {
-    if (isVip)
-      return { qty: 1, label: "Scale & Profit - VIP", price: live.vip ?? 1600 };
+    if (isVip) return { qty: 1, label: "Scale & Profit - VIP", price: live.vip ?? 1600 };
     return gaOptions.find((g) => g.qty === selectedQty) ?? gaOptions[0];
   }, [isVip, selectedQty, gaOptions, live.vip]);
 
@@ -315,8 +309,6 @@ function CheckoutPage() {
     [ghlContactId, pushGhl],
   );
 
-
-
   // Questions → Payment: all questions required, then save the contact + info to
   // GHL (so the survey is captured even if payment is abandoned) and reveal the
   // embedded GHL payment form.
@@ -345,6 +337,14 @@ function CheckoutPage() {
           quantity: isVip ? 1 : selectedQty,
           amount: total,
           survey,
+          // Event details → opportunity cohort fields (for email/messaging merges).
+          event: {
+            name: cityInfo.name,
+            date: cityInfo.date,
+            venue: cityInfo.venue,
+            address: cityInfo.address,
+            time: events.find((e) => e.slug === (city ?? "boston"))?.time,
+          },
         },
       });
       // Push any synced custom-field edits back to GHL too
@@ -388,7 +388,9 @@ function CheckoutPage() {
 
       <div className="mx-auto max-w-6xl px-6 py-10">
         <div className="mb-8">
-          <p className="text-sm uppercase tracking-[0.3em] text-primary">{cityInfo.name} — {cityInfo.date}</p>
+          <p className="text-sm uppercase tracking-[0.3em] text-primary">
+            {cityInfo.name} — {cityInfo.date}
+          </p>
           <h1 className="mt-2 text-3xl font-black md:text-4xl">
             {isVip ? "VIP Experience Checkout" : "General Admission Checkout"}
           </h1>
@@ -438,9 +440,7 @@ function CheckoutPage() {
                         <Input
                           required
                           value={yourInfo.firstName}
-                          onChange={(e) =>
-                            setYourInfo({ ...yourInfo, firstName: e.target.value })
-                          }
+                          onChange={(e) => setYourInfo({ ...yourInfo, firstName: e.target.value })}
                           onBlur={(e) => schedulePush({ firstName: e.target.value })}
                         />
                       </Field>
@@ -448,9 +448,7 @@ function CheckoutPage() {
                         <Input
                           required
                           value={yourInfo.lastName}
-                          onChange={(e) =>
-                            setYourInfo({ ...yourInfo, lastName: e.target.value })
-                          }
+                          onChange={(e) => setYourInfo({ ...yourInfo, lastName: e.target.value })}
                           onBlur={(e) => schedulePush({ lastName: e.target.value })}
                         />
                       </Field>
@@ -477,7 +475,11 @@ function CheckoutPage() {
                           />
                         </Button>
                       </div>
-                      <SyncIndicator status={syncStatus} error={syncError} hasContact={!!ghlContactId} />
+                      <SyncIndicator
+                        status={syncStatus}
+                        error={syncError}
+                        hasContact={!!ghlContactId}
+                      />
                     </Field>
                     <Field label="Phone">
                       <div className="flex gap-2">
@@ -549,9 +551,7 @@ function CheckoutPage() {
                         required
                         placeholder="Enter your state"
                         value={survey.agencyState}
-                        onChange={(e) =>
-                          setSurvey({ ...survey, agencyState: e.target.value })
-                        }
+                        onChange={(e) => setSurvey({ ...survey, agencyState: e.target.value })}
                       />
                     </Field>
 
@@ -575,15 +575,25 @@ function CheckoutPage() {
                       </div>
                     </div>
 
-                    <Field label="Have you attended a Scale + Profit seminar before?">
-                      <Input
-                        required
-                        value={survey.attendedBefore}
-                        onChange={(e) =>
-                          setSurvey({ ...survey, attendedBefore: e.target.value })
-                        }
-                      />
-                    </Field>
+                    <div className="space-y-2">
+                      <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+                        Have you attended a Scale + Profit seminar before?
+                      </Label>
+                      <div className="flex flex-col gap-2">
+                        {["Yes", "No"].map((opt) => (
+                          <label key={opt} className="flex items-center gap-2 text-sm">
+                            <input
+                              type="radio"
+                              name="attendedBefore"
+                              className="accent-primary"
+                              checked={survey.attendedBefore === opt}
+                              onChange={() => setSurvey({ ...survey, attendedBefore: opt })}
+                            />
+                            {opt}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
 
                     <div className="space-y-2">
                       <Label className="text-xs uppercase tracking-wide text-muted-foreground">
@@ -605,12 +615,8 @@ function CheckoutPage() {
                       </div>
                     </div>
 
-                    {surveyError && (
-                      <p className="text-xs text-destructive">{surveyError}</p>
-                    )}
-                    {submitError && (
-                      <p className="text-xs text-destructive">{submitError}</p>
-                    )}
+                    {surveyError && <p className="text-xs text-destructive">{surveyError}</p>}
+                    {submitError && <p className="text-xs text-destructive">{submitError}</p>}
                     <div className="flex gap-3">
                       <Button
                         type="button"
@@ -676,8 +682,8 @@ function CheckoutPage() {
                 <p className="mt-1 text-3xl font-black text-primary">
                   $
                   {(isVip
-                    ? live.vip ?? 1600
-                    : gaOptions.find((g) => g.qty === 1)?.price ?? gaOptions[0].price
+                    ? (live.vip ?? 1600)
+                    : (gaOptions.find((g) => g.qty === 1)?.price ?? gaOptions[0].price)
                   ).toLocaleString()}
                 </p>
                 {isVip && (
@@ -743,15 +749,12 @@ function SyncIndicator({
   if (status === "syncing")
     return <p className="mt-1 text-xs text-muted-foreground">Syncing with GHL…</p>;
   if (status === "error")
-    return (
-      <p className="mt-1 text-xs text-destructive">
-        Sync failed{error ? `: ${error}` : ""}
-      </p>
-    );
+    return <p className="mt-1 text-xs text-destructive">Sync failed{error ? `: ${error}` : ""}</p>;
   return (
     <p className="mt-1 text-xs text-primary">
-      {hasContact ? "✓ Synced from GHL contact" : "✓ No existing GHL contact — new one will be created"}
+      {hasContact
+        ? "✓ Synced from GHL contact"
+        : "✓ No existing GHL contact — new one will be created"}
     </p>
   );
 }
-

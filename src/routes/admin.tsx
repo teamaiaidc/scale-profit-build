@@ -1,21 +1,51 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { useEffect, useState } from "react";
-import { Lock, Save, Check, Loader2, Plus, Trash2, CalendarClock, FlaskConical } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import {
+  Lock,
+  Save,
+  Check,
+  Loader2,
+  Plus,
+  Trash2,
+  CalendarClock,
+  FlaskConical,
+  RefreshCw,
+  Users,
+  CalendarDays,
+  Ticket,
+  Mail,
+  Phone,
+  MapPin,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { listEvents, verifyAdminPassword } from "@/lib/events.functions";
+import {
+  listSeminarPurchasers,
+  getPurchaserDetail,
+  type SeminarPurchaser,
+  type PurchaserDetail,
+} from "@/lib/ghl.functions";
 import { getTodayISO, splitEvents, type EventRow } from "@/lib/events";
 import { loadStoredEvents, saveStoredEvents } from "@/lib/events.store";
 
 export const Route = createFileRoute("/admin")({
   head: () => ({
-    meta: [
-      { title: "Admin — Scale & Profit" },
-      { name: "robots", content: "noindex, nofollow" },
-    ],
+    meta: [{ title: "Admin — Scale & Profit" }, { name: "robots", content: "noindex, nofollow" }],
   }),
   loader: async () => ({ events: await listEvents() }),
   component: AdminPage,
@@ -194,6 +224,27 @@ function AdminPage() {
   const [addState, setAddState] = useState<SaveState>("idle");
   const [addError, setAddError] = useState("");
 
+  // Purchases / attendees tab (loaded lazily from GHL on first view).
+  const purchasersFn = useServerFn(listSeminarPurchasers);
+  const [purchasers, setPurchasers] = useState<SeminarPurchaser[] | null>(null);
+  const [loadingPurchasers, setLoadingPurchasers] = useState(false);
+  const [purchasersError, setPurchasersError] = useState<string | null>(null);
+
+  const loadPurchasers = useCallback(async () => {
+    setLoadingPurchasers(true);
+    setPurchasersError(null);
+    try {
+      const res = await purchasersFn({ data: { password } });
+      setPurchasers(res.purchasers);
+      if (res.error) setPurchasersError(res.error);
+    } catch (err) {
+      setPurchasersError(err instanceof Error ? err.message : "Failed to load purchasers.");
+      setPurchasers([]);
+    } finally {
+      setLoadingPurchasers(false);
+    }
+  }, [purchasersFn, password]);
+
   // Hydrate from this browser's saved edits once mounted.
   useEffect(() => {
     setEvents(loadStoredEvents(initialEvents));
@@ -222,9 +273,7 @@ function AdminPage() {
   }
 
   function editField(slug: string, key: keyof EventRow, value: string) {
-    setEvents((prev) =>
-      prev.map((ev) => (ev.slug === slug ? { ...ev, [key]: value } : ev)),
-    );
+    setEvents((prev) => prev.map((ev) => (ev.slug === slug ? { ...ev, [key]: value } : ev)));
     setSaveState((s) => ({ ...s, [slug]: "idle" }));
   }
 
@@ -295,129 +344,508 @@ function AdminPage() {
 
   return (
     <div className="min-h-screen bg-background px-6 py-12 text-foreground">
-      <div className="mx-auto max-w-3xl">
+      <div className="mx-auto max-w-5xl">
         <div className="mb-8 flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold">Event Admin</h1>
+            <h1 className="text-3xl font-bold">Scale &amp; Profit Admin</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              The public site shows only <strong>upcoming</strong> events, soonest first.
-              Once an event’s end date passes it drops into “Past”. Edits are saved in this
-              browser.
+              Manage events and review who has purchased tickets.
             </p>
           </div>
-          <div className="flex shrink-0 items-center gap-4">
-            <Button variant="outline" size="sm" onClick={loadTestData}>
-              <FlaskConical className="mr-1.5 h-4 w-4" /> Load test data
-            </Button>
-            <a href="/" className="text-sm text-primary hover:underline">
-              View site →
-            </a>
-          </div>
+          <a href="/" className="text-sm text-primary hover:underline">
+            View site →
+          </a>
         </div>
 
-        {/* Past events */}
-        {past.length > 0 && (
-          <section className="mb-10">
-            <h2 className="mb-3 flex items-center gap-2 text-lg font-bold text-muted-foreground">
-              <CalendarClock className="h-5 w-5" /> Past Events
-            </h2>
-            <div className="space-y-3">
-              {past.map((ev) => (
-                <Card
-                  key={ev.slug}
-                  className="flex items-center justify-between gap-4 border-dashed p-4 opacity-80"
-                >
-                  <div>
-                    <p className="font-semibold capitalize">{ev.city || ev.slug}</p>
-                    <p className="text-sm text-muted-foreground">
-                      {ev.date} — ended {ev.end_date}
-                    </p>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => remove(ev.slug)}
-                    className="text-destructive hover:text-destructive"
-                  >
-                    <Trash2 className="mr-1.5 h-4 w-4" /> Remove
-                  </Button>
-                </Card>
-              ))}
-            </div>
-          </section>
-        )}
+        <Tabs
+          defaultValue="events"
+          onValueChange={(v) => {
+            if (v === "purchases" && purchasers === null && !loadingPurchasers) {
+              loadPurchasers();
+            }
+          }}
+        >
+          <TabsList className="mb-8">
+            <TabsTrigger value="events">
+              <CalendarDays className="mr-1.5 h-4 w-4" /> Events
+            </TabsTrigger>
+            <TabsTrigger value="purchases">
+              <Users className="mr-1.5 h-4 w-4" /> Attendees
+            </TabsTrigger>
+          </TabsList>
 
-        {/* Upcoming events */}
-        <section className="mb-10">
-          <h2 className="mb-3 text-lg font-bold">Upcoming Events</h2>
-          {upcoming.length === 0 && (
-            <p className="mb-4 rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
-              No upcoming events. Add one below so the site has something to show.
-            </p>
-          )}
-          <div className="space-y-6">
-            {upcoming.map((ev) => {
-              const state = saveState[ev.slug] ?? "idle";
-              return (
-                <Card key={ev.slug} className="p-6">
-                  <h3 className="mb-4 text-xl font-bold capitalize">{ev.city || ev.slug}</h3>
-                  <EventFields
-                    value={ev}
-                    idPrefix={ev.slug}
-                    onChange={(key, v) => editField(ev.slug, key, v)}
-                  />
-                  <div className="mt-4 flex items-center justify-between gap-3">
-                    <Button onClick={() => save(ev)}>
-                      {state === "saved" ? (
-                        <Check className="mr-2 h-4 w-4" />
-                      ) : (
-                        <Save className="mr-2 h-4 w-4" />
-                      )}
-                      {state === "saved" ? "Saved" : "Save changes"}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      onClick={() => remove(ev.slug)}
-                      className="text-destructive hover:text-destructive"
-                    >
-                      <Trash2 className="mr-1.5 h-4 w-4" /> Delete
-                    </Button>
-                  </div>
-                </Card>
-              );
-            })}
-          </div>
-        </section>
-
-        {/* Add new event */}
-        <section>
-          <h2 className="mb-3 flex items-center gap-2 text-lg font-bold">
-            <Plus className="h-5 w-5 text-primary" /> Add Upcoming Event
-          </h2>
-          <Card className="p-6">
-            <EventFields
-              value={newEvent}
-              idPrefix="new"
-              withSlug
-              onChange={(key, v) => {
-                setNewEvent((prev) => ({ ...prev, [key]: v }));
-                setAddState("idle");
-              }}
-            />
-            {addError && <p className="mt-3 text-sm text-destructive">{addError}</p>}
-            <div className="mt-4">
-              <Button onClick={addEvent}>
-                {addState === "saved" ? (
-                  <Check className="mr-2 h-4 w-4" />
-                ) : (
-                  <Plus className="mr-2 h-4 w-4" />
-                )}
-                {addState === "saved" ? "Added" : "Add event"}
+          <TabsContent value="events">
+            <div className="mb-6 flex justify-end">
+              <Button variant="outline" size="sm" onClick={loadTestData}>
+                <FlaskConical className="mr-1.5 h-4 w-4" /> Load test data
               </Button>
             </div>
-          </Card>
-        </section>
+
+            {/* Past events */}
+            {past.length > 0 && (
+              <section className="mb-10">
+                <h2 className="mb-3 flex items-center gap-2 text-lg font-bold text-muted-foreground">
+                  <CalendarClock className="h-5 w-5" /> Past Events
+                </h2>
+                <div className="space-y-3">
+                  {past.map((ev) => (
+                    <Card
+                      key={ev.slug}
+                      className="flex items-center justify-between gap-4 border-dashed p-4 opacity-80"
+                    >
+                      <div>
+                        <p className="font-semibold capitalize">{ev.city || ev.slug}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {ev.date} — ended {ev.end_date}
+                        </p>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => remove(ev.slug)}
+                        className="text-destructive hover:text-destructive"
+                      >
+                        <Trash2 className="mr-1.5 h-4 w-4" /> Remove
+                      </Button>
+                    </Card>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Upcoming events */}
+            <section className="mb-10">
+              <h2 className="mb-3 text-lg font-bold">Upcoming Events</h2>
+              {upcoming.length === 0 && (
+                <p className="mb-4 rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
+                  No upcoming events. Add one below so the site has something to show.
+                </p>
+              )}
+              <div className="space-y-6">
+                {upcoming.map((ev) => {
+                  const state = saveState[ev.slug] ?? "idle";
+                  return (
+                    <Card key={ev.slug} className="p-6">
+                      <h3 className="mb-4 text-xl font-bold capitalize">{ev.city || ev.slug}</h3>
+                      <EventFields
+                        value={ev}
+                        idPrefix={ev.slug}
+                        onChange={(key, v) => editField(ev.slug, key, v)}
+                      />
+                      <div className="mt-4 flex items-center justify-between gap-3">
+                        <Button onClick={() => save(ev)}>
+                          {state === "saved" ? (
+                            <Check className="mr-2 h-4 w-4" />
+                          ) : (
+                            <Save className="mr-2 h-4 w-4" />
+                          )}
+                          {state === "saved" ? "Saved" : "Save changes"}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          onClick={() => remove(ev.slug)}
+                          className="text-destructive hover:text-destructive"
+                        >
+                          <Trash2 className="mr-1.5 h-4 w-4" /> Delete
+                        </Button>
+                      </div>
+                    </Card>
+                  );
+                })}
+              </div>
+            </section>
+
+            {/* Add new event */}
+            <section>
+              <h2 className="mb-3 flex items-center gap-2 text-lg font-bold">
+                <Plus className="h-5 w-5 text-primary" /> Add Upcoming Event
+              </h2>
+              <Card className="p-6">
+                <EventFields
+                  value={newEvent}
+                  idPrefix="new"
+                  withSlug
+                  onChange={(key, v) => {
+                    setNewEvent((prev) => ({ ...prev, [key]: v }));
+                    setAddState("idle");
+                  }}
+                />
+                {addError && <p className="mt-3 text-sm text-destructive">{addError}</p>}
+                <div className="mt-4">
+                  <Button onClick={addEvent}>
+                    {addState === "saved" ? (
+                      <Check className="mr-2 h-4 w-4" />
+                    ) : (
+                      <Plus className="mr-2 h-4 w-4" />
+                    )}
+                    {addState === "saved" ? "Added" : "Add event"}
+                  </Button>
+                </div>
+              </Card>
+            </section>
+          </TabsContent>
+
+          <TabsContent value="purchases">
+            <PurchasesView
+              purchasers={purchasers}
+              events={events}
+              loading={loadingPurchasers}
+              error={purchasersError}
+              onRefresh={loadPurchasers}
+              password={password}
+            />
+          </TabsContent>
+        </Tabs>
       </div>
+    </div>
+  );
+}
+
+// ===== Attendees / purchases tab =====
+
+type EventGroup = {
+  slug: string;
+  name: string;
+  rows: SeminarPurchaser[];
+  revenue: number;
+};
+
+function groupByEvent(purchasers: SeminarPurchaser[], events: EventRow[]): EventGroup[] {
+  const nameBySlug = new Map(events.map((e) => [e.slug, e.city || e.slug]));
+  const order = events.map((e) => e.slug);
+  const buckets = new Map<string, SeminarPurchaser[]>();
+  for (const p of purchasers) {
+    const slug = p.eventSlug || "unknown";
+    const list = buckets.get(slug) ?? [];
+    list.push(p);
+    buckets.set(slug, list);
+  }
+  return [...buckets.keys()]
+    .sort((a, b) => {
+      const ia = order.indexOf(a);
+      const ib = order.indexOf(b);
+      if (ia === -1 && ib === -1) return a.localeCompare(b);
+      if (ia === -1) return 1;
+      if (ib === -1) return -1;
+      return ia - ib;
+    })
+    .map((slug) => {
+      const rows = buckets.get(slug)!;
+      return {
+        slug,
+        name:
+          nameBySlug.get(slug) ??
+          (slug === "unknown" ? "Unassigned" : slug.replace(/\b\w/g, (c) => c.toUpperCase())),
+        rows,
+        revenue: rows.reduce((n, r) => n + r.amount, 0),
+      };
+    });
+}
+
+function PurchasesView({
+  purchasers,
+  events,
+  loading,
+  error,
+  onRefresh,
+  password,
+}: {
+  purchasers: SeminarPurchaser[] | null;
+  events: EventRow[];
+  loading: boolean;
+  error: string | null;
+  onRefresh: () => void;
+  password: string;
+}) {
+  const [selected, setSelected] = useState<SeminarPurchaser | null>(null);
+  const groups = purchasers ? groupByEvent(purchasers, events) : [];
+  const totalPeople = purchasers?.length ?? 0;
+  const totalRevenue = groups.reduce((n, g) => n + g.revenue, 0);
+
+  return (
+    <div>
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+        <div className="flex flex-wrap gap-3">
+          <Stat icon={<Users className="h-4 w-4" />} label="People" value={String(totalPeople)} />
+          <Stat
+            icon={<CalendarDays className="h-4 w-4" />}
+            label="Events"
+            value={String(groups.length)}
+          />
+          {totalRevenue > 0 && (
+            <Stat
+              icon={<Ticket className="h-4 w-4" />}
+              label="Indicative revenue"
+              value={`$${totalRevenue.toLocaleString()}`}
+            />
+          )}
+        </div>
+        <Button variant="outline" size="sm" onClick={onRefresh} disabled={loading}>
+          <RefreshCw className={`mr-1.5 h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+          {loading ? "Loading…" : "Refresh"}
+        </Button>
+      </div>
+
+      {error && (
+        <p className="mb-4 rounded-lg border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
+          {error}
+        </p>
+      )}
+
+      {loading && purchasers === null && (
+        <div className="flex items-center justify-center gap-2 rounded-lg border border-dashed border-border p-12 text-muted-foreground">
+          <Loader2 className="h-5 w-5 animate-spin" /> Loading purchasers from GHL…
+        </div>
+      )}
+
+      {!loading && purchasers !== null && groups.length === 0 && (
+        <p className="rounded-lg border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+          No purchasers found yet. Once people buy tickets they’ll appear here, grouped by event.
+        </p>
+      )}
+
+      <div className="space-y-8">
+        {groups.map((group) => (
+          <section key={group.slug}>
+            <div className="mb-3 flex items-baseline justify-between gap-4">
+              <h2 className="text-lg font-bold capitalize">{group.name}</h2>
+              <p className="text-sm text-muted-foreground">
+                {group.rows.length} {group.rows.length === 1 ? "person" : "people"}
+                {group.revenue > 0 && <> · ${group.revenue.toLocaleString()}</>}
+              </p>
+            </div>
+            <Card className="overflow-hidden">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Email</TableHead>
+                    <TableHead>Tier</TableHead>
+                    <TableHead className="text-right">Amount</TableHead>
+                    <TableHead>Tags</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {group.rows.map((p) => (
+                    <TableRow
+                      key={p.id || p.email}
+                      className="cursor-pointer"
+                      onClick={() => setSelected(p)}
+                    >
+                      <TableCell className="font-medium">
+                        {p.name || "—"}
+                        {p.isAttendee && (
+                          <Badge variant="secondary" className="ml-2 align-middle text-[10px]">
+                            attendee
+                          </Badge>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">{p.email || "—"}</TableCell>
+                      <TableCell>{p.tier || "—"}</TableCell>
+                      <TableCell className="text-right">
+                        {p.amount > 0 ? `$${p.amount.toLocaleString()}` : "—"}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex max-w-[260px] flex-wrap gap-1">
+                          {p.tags.slice(0, 3).map((t) => (
+                            <Badge key={t} variant="outline" className="text-[10px]">
+                              {t}
+                            </Badge>
+                          ))}
+                          {p.tags.length > 3 && (
+                            <Badge variant="outline" className="text-[10px]">
+                              +{p.tags.length - 3}
+                            </Badge>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </Card>
+          </section>
+        ))}
+      </div>
+
+      <PurchaserDialog purchaser={selected} password={password} onClose={() => setSelected(null)} />
+    </div>
+  );
+}
+
+function Stat({ icon, label, value }: { icon?: React.ReactNode; label: string; value: string }) {
+  return (
+    <div className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2">
+      {icon && <span className="text-primary">{icon}</span>}
+      <div>
+        <p className="text-lg font-bold leading-none">{value}</p>
+        <p className="text-xs text-muted-foreground">{label}</p>
+      </div>
+    </div>
+  );
+}
+
+function PurchaserDialog({
+  purchaser,
+  password,
+  onClose,
+}: {
+  purchaser: SeminarPurchaser | null;
+  password: string;
+  onClose: () => void;
+}) {
+  const p = purchaser;
+  const detailFn = useServerFn(getPurchaserDetail);
+  const [detail, setDetail] = useState<PurchaserDetail | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
+
+  // Fetch the contact's custom fields when a row is opened (GHL's search
+  // endpoint omits them, so this needs a per-contact call).
+  useEffect(() => {
+    if (!p?.id) {
+      setDetail(null);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setDetail(null);
+    setDetailError(null);
+    detailFn({ data: { password, contactId: p.id } })
+      .then((res) => {
+        if (!cancelled) setDetail(res);
+      })
+      .catch((err) => {
+        if (!cancelled)
+          setDetailError(err instanceof Error ? err.message : "Failed to load details.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [p?.id, password, detailFn]);
+
+  const answerRows = detail
+    ? [
+        { label: "Which state is your agency in?", value: detail.answers.agencyState },
+        { label: "Do you have a MOA?", value: detail.answers.hasMoa },
+        {
+          label: "Attended a Scale + Profit seminar before?",
+          value: detail.answers.attendedBefore,
+        },
+        { label: "Shirt size", value: detail.answers.shirtSize },
+      ].filter((r) => r.value)
+    : [];
+  const ticketQty = detail && detail.ticketQuantity > 0 ? detail.ticketQuantity : null;
+
+  return (
+    <Dialog open={p !== null} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+        {p && (
+          <>
+            <DialogHeader>
+              <DialogTitle className="flex flex-wrap items-center gap-2">
+                {p.name || p.email || "Attendee"}
+                {p.tier && <Badge variant="secondary">{p.tier}</Badge>}
+                {p.isAttendee && <Badge variant="outline">attendee</Badge>}
+              </DialogTitle>
+            </DialogHeader>
+
+            <div className="space-y-5 text-sm">
+              {/* Contact */}
+              <div className="space-y-1.5">
+                <InfoRow icon={<Mail className="h-4 w-4" />} value={p.email || "—"} />
+                <InfoRow icon={<Phone className="h-4 w-4" />} value={p.phone || "—"} />
+                {p.state && <InfoRow icon={<MapPin className="h-4 w-4" />} value={p.state} />}
+              </div>
+
+              {/* Order summary */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-lg border border-border p-3">
+                  <p className="text-xs text-muted-foreground">Tickets purchased</p>
+                  <p className="text-xl font-bold">{loading ? "…" : (ticketQty ?? "—")}</p>
+                </div>
+                <div className="rounded-lg border border-border p-3">
+                  <p className="text-xs text-muted-foreground">Amount</p>
+                  <p className="text-xl font-bold">
+                    {p.amount > 0 ? `$${p.amount.toLocaleString()}` : "—"}
+                  </p>
+                </div>
+              </div>
+
+              {/* Tags */}
+              {p.tags.length > 0 && (
+                <div>
+                  <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Tags
+                  </p>
+                  <div className="flex flex-wrap gap-1">
+                    {p.tags.map((t) => (
+                      <Badge key={t} variant="outline" className="text-[11px]">
+                        {t}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Checkout form answers */}
+              <div>
+                <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Checkout form answers
+                </p>
+                {loading && (
+                  <p className="flex items-center gap-2 text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+                  </p>
+                )}
+                {!loading && detailError && <p className="text-destructive">{detailError}</p>}
+                {!loading && !detailError && answerRows.length === 0 && (
+                  <p className="text-muted-foreground">No form answers on this contact.</p>
+                )}
+                {!loading && answerRows.length > 0 && (
+                  <dl className="space-y-2">
+                    {answerRows.map((r) => (
+                      <div key={r.label} className="flex justify-between gap-4">
+                        <dt className="text-muted-foreground">{r.label}</dt>
+                        <dd className="text-right font-medium">{r.value}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                )}
+              </div>
+
+              {/* All other custom fields */}
+              {detail && detail.customFields.length > 0 && (
+                <details className="rounded-lg border border-border p-3">
+                  <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    All custom fields ({detail.customFields.length})
+                  </summary>
+                  <dl className="mt-2 space-y-2">
+                    {detail.customFields.map((f) => (
+                      <div key={f.id} className="flex justify-between gap-4">
+                        <dt className="text-muted-foreground">{f.label}</dt>
+                        <dd className="text-right font-medium">{f.value}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                </details>
+              )}
+            </div>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function InfoRow({ icon, value }: { icon: React.ReactNode; value: string }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-muted-foreground">{icon}</span>
+      <span>{value}</span>
     </div>
   );
 }
