@@ -510,28 +510,8 @@ function CheckoutPage() {
                       </div>
                     </Field>
 
-                    {ghlContactId && fieldDefs.length > 0 && (
-                      <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-4">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                          GHL Custom Fields (synced)
-                        </p>
-                        {fieldDefs.map((def) => (
-                          <Field key={def.id} label={def.name}>
-                            <Input
-                              value={customValues[def.id] ?? ""}
-                              onChange={(e) =>
-                                setCustomValues((prev) => ({ ...prev, [def.id]: e.target.value }))
-                              }
-                              onBlur={(e) =>
-                                schedulePush({
-                                  customFields: [{ id: def.id, value: e.target.value }],
-                                })
-                              }
-                            />
-                          </Field>
-                        ))}
-                      </div>
-                    )}
+
+
 
                     <Button type="button" className="w-full" onClick={() => setStep(2)}>
                       Continue
