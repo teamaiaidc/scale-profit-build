@@ -6,13 +6,6 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { addAttendeesToGhl } from "@/lib/ghl.functions";
 import logo from "@/assets/hero-banner.webp";
 
@@ -155,30 +148,15 @@ function ConfirmationPage() {
         {/* GA: ticket-count selector so the buyer can register every attendee */}
         {!isVip && !saved && (
           <Card className="mt-10 p-6">
-            <h2 className="text-xl font-bold">Register your attendees</h2>
+            <h2 className="text-xl font-bold">
+              Register your {ticketCount === 1 ? "attendee" : `${ticketCount} attendees`}
+            </h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              How many tickets did you purchase? We'll show one form per attendee.
+              {ticketCount === 1
+                ? "Please confirm your attendee details below."
+                : `You purchased ${ticketCount} tickets — please fill in details for each attendee.`}
             </p>
-            <div className="mt-4 max-w-xs">
-              <Label className="text-xs uppercase tracking-wide text-muted-foreground">
-                Number of tickets
-              </Label>
-              <Select
-                value={String(ticketCount)}
-                onValueChange={(v) => setTicketCount(Math.min(Math.max(parseInt(v, 10), 1), 20))}
-              >
-                <SelectTrigger className="mt-1.5">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {[1, 2, 3, 4, 5].map((n) => (
-                    <SelectItem key={n} value={String(n)}>
-                      {n} {n === 1 ? "ticket" : "tickets"}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+
 
             <form onSubmit={handleSubmit} className="mt-6 space-y-5">
               {attendees.map((a, i) => (
