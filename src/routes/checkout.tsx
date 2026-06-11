@@ -760,8 +760,6 @@ function SyncIndicator({
 }) {
   if (status === "syncing")
     return <p className="mt-1 text-xs text-muted-foreground">Syncing…</p>;
-  if (status === "error")
-    return <p className="mt-1 text-xs text-destructive">Sync failed{error ? `: ${error}` : ""}</p>;
   return null;
 }
 
