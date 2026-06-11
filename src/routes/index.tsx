@@ -455,66 +455,91 @@ function Index() {
           business that gives you freedom.
         </p>
 
-        <div className="mt-10 space-y-4">
-          {events.map((e: EventRow, i: number) => (
-            <Card key={e.slug} className="overflow-hidden">
-              <button
-                onClick={() => setOpenEvent(openEvent === i ? null : i)}
-                className="flex w-full items-center justify-between gap-4 p-6 text-left transition-colors hover:bg-muted/40"
-              >
-                <div>
-                  <h3 className="text-2xl font-bold">{e.city}</h3>
-                  <p className="text-primary">{e.date}</p>
-                  <p className="text-sm text-muted-foreground">
-                    {e.venue} — {e.address}
-                  </p>
-                </div>
-                <span className="text-2xl text-primary">{openEvent === i ? "−" : "+"}</span>
-              </button>
-
-              {openEvent === i && (
-                <div
-                  id={`event-tiers-${i}`}
-                  className="grid gap-6 border-t border-border bg-background/40 p-6 md:grid-cols-2"
-                >
-                  {tiers.map((tier) => (
-                    <Card
-                      key={tier.name}
-                      className={`flex h-full flex-col p-6 ${tier.featured ? "border-primary" : ""}`}
+        {(() => {
+          const slots: (EventRow | null)[] = events.slice(0, 4);
+          while (slots.length < 4) slots.push(null);
+          return (
+            <div className="mt-10 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+              {slots.map((e, i) =>
+                e ? (
+                  <Card key={e.slug} className="flex flex-col p-6">
+                    <h3 className="text-2xl font-bold">{e.city}</h3>
+                    <p className="mt-1 text-primary">{e.date}</p>
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      {e.venue}
+                      {e.address ? ` — ${e.address}` : ""}
+                    </p>
+                    <Button
+                      className="mt-6 w-full"
+                      onClick={() => setOpenEvent(openEvent === i ? null : i)}
                     >
-                      <h4 className="text-xl font-bold">{tier.name}</h4>
-                      <p className="mt-2 text-3xl font-black text-primary">{tier.price}</p>
-                      {tier.note && (
-                        <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                          {tier.note}
-                        </p>
-                      )}
-                      <ul className="mt-4 flex-1 space-y-2 text-sm">
-                        {tier.perks.map((p) => (
-                          <li key={p} className="flex gap-2">
-                            <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-                            <span>{p}</span>
-                          </li>
-                        ))}
-                      </ul>
-                      <Button asChild className="mt-6 w-full">
-                        <Link
-                          to="/checkout"
-                          search={{
-                            city: e.slug,
-                            tier: tier.featured ? "vip" : "ga",
-                          }}
-                        >
-                          Sign Up Now!
-                        </Link>
-                      </Button>
-                    </Card>
-                  ))}
-                </div>
+                      {openEvent === i ? "Hide Tickets" : "View Tickets"}
+                    </Button>
+                  </Card>
+                ) : (
+                  <Card
+                    key={`tbd-${i}`}
+                    className="flex flex-col items-center justify-center border-dashed p-6 text-center opacity-80"
+                  >
+                    <h3 className="text-2xl font-bold text-muted-foreground">TBD</h3>
+                    <p className="mt-2 text-sm uppercase tracking-[0.2em] text-primary">
+                      Coming Soon
+                    </p>
+                    <p className="mt-3 text-sm text-muted-foreground">
+                      New city announcement on the way.
+                    </p>
+                  </Card>
+                ),
               )}
-            </Card>
-          ))}
-        </div>
+            </div>
+          );
+        })()}
+
+        {openEvent !== null && events[openEvent] && (
+          <div
+            id={`event-tiers-${openEvent}`}
+            className="mt-8 grid gap-6 rounded-xl border border-border bg-background/40 p-6 md:grid-cols-2"
+          >
+            {tiers.map((tier) => (
+              <Card
+                key={tier.name}
+                className={`flex h-full flex-col p-6 ${tier.featured ? "border-primary" : ""}`}
+              >
+                <h4 className="text-xl font-bold">
+                  {tier.name}{" "}
+                  <span className="text-base font-normal text-muted-foreground">
+                    — {events[openEvent]!.city}
+                  </span>
+                </h4>
+                <p className="mt-2 text-3xl font-black text-primary">{tier.price}</p>
+                {tier.note && (
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                    {tier.note}
+                  </p>
+                )}
+                <ul className="mt-4 flex-1 space-y-2 text-sm">
+                  {tier.perks.map((p) => (
+                    <li key={p} className="flex gap-2">
+                      <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                      <span>{p}</span>
+                    </li>
+                  ))}
+                </ul>
+                <Button asChild className="mt-6 w-full">
+                  <Link
+                    to="/checkout"
+                    search={{
+                      city: events[openEvent]!.slug,
+                      tier: tier.featured ? "vip" : "ga",
+                    }}
+                  >
+                    Sign Up Now!
+                  </Link>
+                </Button>
+              </Card>
+            ))}
+          </div>
+        )}
       </Section>
 
       {/* Game plan */}
