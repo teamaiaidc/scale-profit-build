@@ -256,7 +256,7 @@ function CheckoutPage() {
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [step, navigate, city, isVip, yourInfo]);
+  }, [step, navigate, city, isVip, selectedQty, yourInfo]);
 
 
 
