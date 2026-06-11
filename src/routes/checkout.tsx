@@ -239,12 +239,40 @@ function CheckoutPage() {
         const str =
           typeof raw === "string" ? raw : raw && typeof raw === "object" ? JSON.stringify(raw) : "";
         if (!/form[_-]?submit|submitted|success|payment[_-]?success/i.test(str)) return;
+
+        // Derive qty from the GHL form payload. GHL posts the chosen
+        // product/price info on submit — parse it to find which tier the
+        // buyer actually purchased so we know how many attendees to collect.
+        let qty = isVip ? 1 : 1;
+        if (!isVip) {
+          // 1) Try explicit qty/quantity field in the payload.
+          const qtyMatch = str.match(/"(?:qty|quantity|ticket[_-]?count|numberOfTickets)"\s*:\s*"?(\d+)/i);
+          if (qtyMatch) {
+            qty = Math.min(Math.max(parseInt(qtyMatch[1], 10), 1), 20);
+          } else {
+            // 2) Match by price/amount paid against our GA price tiers.
+            const amounts = Array.from(str.matchAll(/(?:amount|total|price|subtotal)"?\s*:\s*"?(\d+(?:\.\d+)?)/gi))
+              .map((m) => parseFloat(m[1]))
+              .filter((n) => n > 0);
+            if (amounts.length > 0) {
+              const paid = Math.max(...amounts); // total is the largest
+              const match = gaOptions.find((o) => Math.abs(o.price - paid) <= 5);
+              if (match) qty = match.qty;
+            }
+            // 3) Fallback: look for "N Ticket(s)" in product/price name.
+            if (qty === 1) {
+              const nameMatch = str.match(/(\d+)\s*ticket/i);
+              if (nameMatch) qty = Math.min(Math.max(parseInt(nameMatch[1], 10), 1), 20);
+            }
+          }
+        }
+
         navigate({
           to: "/confirmation",
           search: {
             city: city ?? "boston",
             tier: isVip ? "vip" : "ga",
-            qty: isVip ? 1 : selectedQty,
+            qty,
             email: yourInfo.email || undefined,
             firstName: yourInfo.firstName || undefined,
             lastName: yourInfo.lastName || undefined,
@@ -256,7 +284,7 @@ function CheckoutPage() {
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [step, navigate, city, isVip, selectedQty, yourInfo]);
+  }, [step, navigate, city, isVip, gaOptions, yourInfo]);
 
 
 
