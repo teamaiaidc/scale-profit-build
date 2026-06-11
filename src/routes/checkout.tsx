@@ -244,7 +244,7 @@ function CheckoutPage() {
           search: {
             city: city ?? "boston",
             tier: isVip ? "vip" : "ga",
-            qty: 1,
+            qty: isVip ? 1 : selectedQty,
             email: yourInfo.email || undefined,
             firstName: yourInfo.firstName || undefined,
             lastName: yourInfo.lastName || undefined,
@@ -256,7 +256,7 @@ function CheckoutPage() {
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [step, navigate, city, isVip, yourInfo]);
+  }, [step, navigate, city, isVip, selectedQty, yourInfo]);
 
 
 
