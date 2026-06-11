@@ -1,7 +1,6 @@
 import { createStart, createMiddleware } from "@tanstack/react-start";
 
 import { renderErrorPage } from "./lib/error-page";
-import { attachSupabaseAuth } from "@/integrations/supabase/auth-attacher";
 
 const errorMiddleware = createMiddleware().server(async ({ next }) => {
   try {
@@ -24,6 +23,6 @@ const errorMiddleware = createMiddleware().server(async ({ next }) => {
 // weren't baked into the build, breaking routes whose loaders call serverFns
 // (e.g. /checkout). Re-add it only if a serverFn starts using requireSupabaseAuth.
 export const startInstance = createStart(() => ({
-  functionMiddleware: [attachSupabaseAuth],
+  functionMiddleware: [],
   requestMiddleware: [errorMiddleware],
 }));
