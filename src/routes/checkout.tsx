@@ -243,26 +243,34 @@ function CheckoutPage() {
         // Derive qty from the GHL form payload. GHL posts the chosen
         // product/price info on submit — parse it to find which tier the
         // buyer actually purchased so we know how many attendees to collect.
-        let qty = isVip ? 1 : 1;
+        let qty = 1;
         if (!isVip) {
-          // 1) Try explicit qty/quantity field in the payload.
+          // 1) Explicit qty field if GHL sends one.
           const qtyMatch = str.match(/"(?:qty|quantity|ticket[_-]?count|numberOfTickets)"\s*:\s*"?(\d+)/i);
           if (qtyMatch) {
             qty = Math.min(Math.max(parseInt(qtyMatch[1], 10), 1), 20);
           } else {
-            // 2) Match by price/amount paid against our GA price tiers.
-            const amounts = Array.from(str.matchAll(/(?:amount|total|price|subtotal)"?\s*:\s*"?(\d+(?:\.\d+)?)/gi))
-              .map((m) => parseFloat(m[1]))
-              .filter((n) => n > 0);
-            if (amounts.length > 0) {
-              const paid = Math.max(...amounts); // total is the largest
-              const match = gaOptions.find((o) => Math.abs(o.price - paid) <= 5);
-              if (match) qty = match.qty;
-            }
-            // 3) Fallback: look for "N Ticket(s)" in product/price name.
-            if (qty === 1) {
-              const nameMatch = str.match(/(\d+)\s*ticket/i);
-              if (nameMatch) qty = Math.min(Math.max(parseInt(nameMatch[1], 10), 1), 20);
+            // 2) Product / price NAME — coupon-proof. Matches:
+            //    "Single Ticket Only" → 1
+            //    "2 Tickets", "3 Tickets", … "N Tickets" → N
+            const single = /single\s*ticket/i.test(str);
+            const nTickets = str.match(/(\d+)\s*tickets?\b/i);
+            if (single && !nTickets) {
+              qty = 1;
+            } else if (nTickets) {
+              qty = Math.min(Math.max(parseInt(nTickets[1], 10), 1), 20);
+            } else {
+              // 3) Last resort: match the amount paid (no coupon case).
+              const amounts = Array.from(
+                str.matchAll(/(?:amount|total|price|subtotal)"?\s*:\s*"?(\d+(?:\.\d+)?)/gi),
+              )
+                .map((m) => parseFloat(m[1]))
+                .filter((n) => n > 0);
+              if (amounts.length > 0) {
+                const paid = Math.max(...amounts);
+                const match = gaOptions.find((o) => Math.abs(o.price - paid) <= 5);
+                if (match) qty = match.qty;
+              }
             }
           }
         }
