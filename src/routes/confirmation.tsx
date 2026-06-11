@@ -237,11 +237,15 @@ function ConfirmationPage() {
           </Card>
         )}
 
-        {isMulti && saved && (
+        {!isVip && saved && (
           <Card className="mt-10 flex items-center gap-3 p-6">
             <Check className="h-6 w-6 shrink-0 text-primary" />
             <div>
-              <p className="font-semibold">All {ticketCount} attendees saved!</p>
+              <p className="font-semibold">
+                {ticketCount === 1
+                  ? "Attendee details saved!"
+                  : `All ${ticketCount} attendees saved!`}
+              </p>
               <p className="text-sm text-muted-foreground">
                 Each attendee will receive their own confirmation. See you at the seminar.
               </p>
@@ -250,7 +254,7 @@ function ConfirmationPage() {
         )}
 
         <div className="mt-10 text-center">
-          <Button asChild size="lg" variant={isMulti && !saved ? "outline" : "default"}>
+          <Button asChild size="lg" variant={!isVip && !saved ? "outline" : "default"}>
             <Link to="/">Back to event details</Link>
           </Button>
         </div>
