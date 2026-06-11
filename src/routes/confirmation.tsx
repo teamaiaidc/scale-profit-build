@@ -58,7 +58,6 @@ function ConfirmationPage() {
   // VIP is always 1 ticket. For GA, let the buyer confirm how many tickets
   // they purchased (GHL doesn't always send a parseable qty payload).
   const [ticketCount, setTicketCount] = useState(initialQty);
-  const isMulti = ticketCount > 1;
 
   const addAttendees = useServerFn(addAttendeesToGhl);
 
