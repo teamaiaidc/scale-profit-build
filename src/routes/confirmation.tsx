@@ -153,13 +153,34 @@ function ConfirmationPage() {
           )}
         </div>
 
-        {/* Multi-ticket attendee form */}
-        {isMulti && !saved && (
+        {/* GA: ticket-count selector so the buyer can register every attendee */}
+        {!isVip && !saved && (
           <Card className="mt-10 p-6">
-            <h2 className="text-xl font-bold">You purchased {ticketCount} tickets</h2>
+            <h2 className="text-xl font-bold">Register your attendees</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              Please provide each attendee's details below so we can register every ticket.
+              How many tickets did you purchase? We'll show one form per attendee.
             </p>
+            <div className="mt-4 max-w-xs">
+              <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+                Number of tickets
+              </Label>
+              <Select
+                value={String(ticketCount)}
+                onValueChange={(v) => setTicketCount(Math.min(Math.max(parseInt(v, 10), 1), 20))}
+              >
+                <SelectTrigger className="mt-1.5">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {[1, 2, 3, 4, 5].map((n) => (
+                    <SelectItem key={n} value={String(n)}>
+                      {n} {n === 1 ? "ticket" : "tickets"}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
             <form onSubmit={handleSubmit} className="mt-6 space-y-5">
               {attendees.map((a, i) => (
                 <div key={i} className="space-y-3 rounded-lg border border-border p-4">
