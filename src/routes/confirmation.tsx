@@ -52,13 +52,16 @@ type Attendee = { firstName: string; lastName: string; email: string };
 
 function ConfirmationPage() {
   const { city, tier, qty, email, firstName, lastName, endDate } = Route.useSearch();
-  const ticketCount = qty ?? 1;
+  const isVip = tier === "vip";
+  const initialQty = qty ?? 1;
+
+  // VIP is always 1 ticket. For GA, let the buyer confirm how many tickets
+  // they purchased (GHL doesn't always send a parseable qty payload).
+  const [ticketCount, setTicketCount] = useState(initialQty);
   const isMulti = ticketCount > 1;
 
   const addAttendees = useServerFn(addAttendeesToGhl);
 
-  // One row per ticket. Row 1 is prefilled with the buyer's purchase details so
-  // they can confirm they're one of the attendees (or edit it).
   const [attendees, setAttendees] = useState<Attendee[]>(() =>
     Array.from({ length: ticketCount }, (_, i) => ({
       firstName: i === 0 ? firstName ?? "" : "",
@@ -66,6 +69,21 @@ function ConfirmationPage() {
       email: i === 0 ? email ?? "" : "",
     })),
   );
+
+  // Re-size the attendee array whenever ticketCount changes, preserving filled rows.
+  useEffect(() => {
+    setAttendees((prev) => {
+      if (prev.length === ticketCount) return prev;
+      const next = Array.from({ length: ticketCount }, (_, i) =>
+        prev[i] ?? {
+          firstName: i === 0 ? firstName ?? "" : "",
+          lastName: i === 0 ? lastName ?? "" : "",
+          email: i === 0 ? email ?? "" : "",
+        },
+      );
+      return next;
+    });
+  }, [ticketCount, firstName, lastName, email]);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
