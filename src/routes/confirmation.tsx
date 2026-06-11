@@ -1,11 +1,18 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CheckCircle2, Loader2, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { addAttendeesToGhl } from "@/lib/ghl.functions";
 import logo from "@/assets/hero-banner.webp";
 
@@ -45,13 +52,15 @@ type Attendee = { firstName: string; lastName: string; email: string };
 
 function ConfirmationPage() {
   const { city, tier, qty, email, firstName, lastName, endDate } = Route.useSearch();
-  const ticketCount = qty ?? 1;
-  const isMulti = ticketCount > 1;
+  const isVip = tier === "vip";
+  const initialQty = qty ?? 1;
+
+  // VIP is always 1 ticket. For GA, let the buyer confirm how many tickets
+  // they purchased (GHL doesn't always send a parseable qty payload).
+  const [ticketCount, setTicketCount] = useState(initialQty);
 
   const addAttendees = useServerFn(addAttendeesToGhl);
 
-  // One row per ticket. Row 1 is prefilled with the buyer's purchase details so
-  // they can confirm they're one of the attendees (or edit it).
   const [attendees, setAttendees] = useState<Attendee[]>(() =>
     Array.from({ length: ticketCount }, (_, i) => ({
       firstName: i === 0 ? firstName ?? "" : "",
@@ -59,6 +68,21 @@ function ConfirmationPage() {
       email: i === 0 ? email ?? "" : "",
     })),
   );
+
+  // Re-size the attendee array whenever ticketCount changes, preserving filled rows.
+  useEffect(() => {
+    setAttendees((prev) => {
+      if (prev.length === ticketCount) return prev;
+      const next = Array.from({ length: ticketCount }, (_, i) =>
+        prev[i] ?? {
+          firstName: i === 0 ? firstName ?? "" : "",
+          lastName: i === 0 ? lastName ?? "" : "",
+          email: i === 0 ? email ?? "" : "",
+        },
+      );
+      return next;
+    });
+  }, [ticketCount, firstName, lastName, email]);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -128,13 +152,34 @@ function ConfirmationPage() {
           )}
         </div>
 
-        {/* Multi-ticket attendee form */}
-        {isMulti && !saved && (
+        {/* GA: ticket-count selector so the buyer can register every attendee */}
+        {!isVip && !saved && (
           <Card className="mt-10 p-6">
-            <h2 className="text-xl font-bold">You purchased {ticketCount} tickets</h2>
+            <h2 className="text-xl font-bold">Register your attendees</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              Please provide each attendee's details below so we can register every ticket.
+              How many tickets did you purchase? We'll show one form per attendee.
             </p>
+            <div className="mt-4 max-w-xs">
+              <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+                Number of tickets
+              </Label>
+              <Select
+                value={String(ticketCount)}
+                onValueChange={(v) => setTicketCount(Math.min(Math.max(parseInt(v, 10), 1), 20))}
+              >
+                <SelectTrigger className="mt-1.5">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {[1, 2, 3, 4, 5].map((n) => (
+                    <SelectItem key={n} value={String(n)}>
+                      {n} {n === 1 ? "ticket" : "tickets"}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
             <form onSubmit={handleSubmit} className="mt-6 space-y-5">
               {attendees.map((a, i) => (
                 <div key={i} className="space-y-3 rounded-lg border border-border p-4">
@@ -191,11 +236,15 @@ function ConfirmationPage() {
           </Card>
         )}
 
-        {isMulti && saved && (
+        {!isVip && saved && (
           <Card className="mt-10 flex items-center gap-3 p-6">
             <Check className="h-6 w-6 shrink-0 text-primary" />
             <div>
-              <p className="font-semibold">All {ticketCount} attendees saved!</p>
+              <p className="font-semibold">
+                {ticketCount === 1
+                  ? "Attendee details saved!"
+                  : `All ${ticketCount} attendees saved!`}
+              </p>
               <p className="text-sm text-muted-foreground">
                 Each attendee will receive their own confirmation. See you at the seminar.
               </p>
@@ -204,7 +253,7 @@ function ConfirmationPage() {
         )}
 
         <div className="mt-10 text-center">
-          <Button asChild size="lg" variant={isMulti && !saved ? "outline" : "default"}>
+          <Button asChild size="lg" variant={!isVip && !saved ? "outline" : "default"}>
             <Link to="/">Back to event details</Link>
           </Button>
         </div>
