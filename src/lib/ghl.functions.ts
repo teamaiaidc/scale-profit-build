@@ -290,6 +290,39 @@ export const lookupGhlContactByEmail = createServerFn({ method: "POST" })
     return { contact, fieldDefs };
   });
 
+// Reads a *location-level* custom value from GHL (the values configured
+// under Settings → Custom Values, e.g. {{custom_values.sp2026ticket_quantity}})
+// and returns the ticket quantity as a number. This is the source of truth
+// for "how many tickets did this buyer purchase" — the GA payment form's
+// quantity dropdown writes into this custom value.
+export const getGhlTicketQuantityCustomValue = createServerFn({ method: "GET" }).handler(
+  async () => {
+    try {
+      const res = (await ghlFetch(`/locations/${GHL_LOCATION_ID}/customValues`, {
+        method: "GET",
+      })) as {
+        customValues?: Array<{ id: string; name?: string; fieldKey?: string; value?: string }>;
+      };
+      const list = res.customValues ?? [];
+      const target = list.find((v) => {
+        const key = `${v.fieldKey ?? ""} ${v.name ?? ""}`.toLowerCase();
+        return (
+          key.includes("sp2026ticket_quantity") ||
+          key.includes("sp2026_ticket_quantity") ||
+          key.includes("ticket_quantity")
+        );
+      });
+      const raw = target?.value ?? "";
+      const match = String(raw).match(/\d+/);
+      const qty = match ? Number(match[0]) : 1;
+      return { quantity: Math.min(Math.max(qty, 1), 20), raw, found: Boolean(target) };
+    } catch (err) {
+      console.warn("GHL location custom value fetch failed:", (err as Error).message);
+      return { quantity: 1, raw: "", found: false };
+    }
+  });
+  });
+
 const pushSchema = z.object({
   contactId: z.string().min(1).max(100),
   firstName: z.string().max(100).optional(),
