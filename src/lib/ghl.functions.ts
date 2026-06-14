@@ -444,6 +444,33 @@ export const getGhlTicketQuantityByEmail = createServerFn({ method: "POST" })
       if (!contact?.id) return { quantity: 1, raw: "", found: false };
       const contactId = contact.id;
 
+      // 1. Read contact custom fields FIRST — the GHL workflow writes
+      // {{contact.sp_no_of_ticket_purchased}} immediately after purchase.
+      const contactMeta = await getFieldMeta();
+      const contactTicketKeys = new Set<string>([
+        FIELD_KEYS.ticketQuantity,
+        FIELD_KEYS.ticketQuantityLegacy,
+        FIELD_KEYS.ticketQuantityLegacy2,
+      ]);
+      const contactTicketIds = new Set(
+        [...contactMeta.entries()]
+          .filter(([, m]) => contactTicketKeys.has(m.key))
+          .map(([id]) => id),
+      );
+      let fieldQty = 0;
+      let raw = "";
+      for (const field of contact.customFields ?? []) {
+        if (contactTicketIds.size > 0 && (!field.id || !contactTicketIds.has(field.id))) continue;
+        const value = readCustomFieldValue(field);
+        const qty = readTicketNumber(value);
+        if (qty > fieldQty) {
+          fieldQty = qty;
+          raw = String(value ?? "");
+        }
+      }
+      if (fieldQty > 0) return { quantity: fieldQty, raw, found: true };
+
+      // 2. Fallback: opportunity fields (legacy path)
       const oppMeta = await getFieldMeta("opportunity");
       const opportunityTicketKeys = new Set<string>([
         OPP_FIELD_KEYS.ticketsPurchased,
@@ -471,9 +498,7 @@ export const getGhlTicketQuantityByEmail = createServerFn({ method: "POST" })
         }>;
       };
 
-      let fieldQty = 0;
       let fallbackQty = 0;
-      let raw = "";
       for (const opportunity of oppRes.opportunities ?? []) {
         fallbackQty = Math.max(
           fallbackQty,
@@ -485,41 +510,19 @@ export const getGhlTicketQuantityByEmail = createServerFn({ method: "POST" })
           if (ticketFieldIds.size > 0 && (!field.id || !ticketFieldIds.has(field.id))) continue;
           const value = readCustomFieldValue(field);
           const qty = readTicketNumber(value);
-          if (qty > fieldQty) {
-            fieldQty = qty;
+          if (qty > fallbackQty) {
+            fallbackQty = qty;
             raw = String(value ?? "");
           }
         }
       }
-      if (fieldQty > 1) return { quantity: fieldQty, raw, found: true };
       if (fallbackQty > 1) return { quantity: fallbackQty, raw: String(fallbackQty), found: true };
 
+      // 3. Last fallback: payment records
       const paymentQty = await fetchPaymentTicketCount(contactId, data.email);
       if (paymentQty > 1) return { quantity: paymentQty, raw: String(paymentQty), found: true };
 
-      const contactMeta = await getFieldMeta();
-      const contactTicketKeys = new Set<string>([
-        FIELD_KEYS.ticketQuantity,
-        FIELD_KEYS.ticketQuantityLegacy,
-      ]);
-      const contactTicketIds = new Set(
-        [...contactMeta.entries()]
-          .filter(([, m]) => contactTicketKeys.has(m.key))
-          .map(([id]) => id),
-      );
-      for (const field of contact.customFields ?? []) {
-        if (contactTicketIds.size > 0 && (!field.id || !contactTicketIds.has(field.id))) continue;
-        const value = readCustomFieldValue(field);
-        const qty = readTicketNumber(value);
-        if (qty > fieldQty) {
-          fieldQty = qty;
-          raw = String(value ?? "");
-        }
-      }
-
-      return fieldQty > 0
-        ? { quantity: fieldQty, raw, found: true }
-        : { quantity: 1, raw: "", found: false };
+      return { quantity: 1, raw: "", found: false };
     } catch (err) {
       console.warn("GHL ticket quantity lookup failed:", (err as Error).message);
       return { quantity: 1, raw: "", found: false };
