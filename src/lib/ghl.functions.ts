@@ -305,6 +305,30 @@ function readTicketNumberFromRecord(value: unknown): number {
   return best;
 }
 
+async function fetchPaymentTicketCount(contactId: string, email: string): Promise<number> {
+  const params = [
+    `locationId=${GHL_LOCATION_ID}&contactId=${encodeURIComponent(contactId)}&limit=50`,
+    `altId=${GHL_LOCATION_ID}&altType=location&contactId=${encodeURIComponent(contactId)}&limit=50`,
+    `locationId=${GHL_LOCATION_ID}&email=${encodeURIComponent(email)}&limit=50`,
+    `altId=${GHL_LOCATION_ID}&altType=location&email=${encodeURIComponent(email)}&limit=50`,
+  ];
+  const paths = params.flatMap((query) => [
+    `/payments/orders?${query}`,
+    `/payments/transactions?${query}`,
+  ]);
+
+  let best = 0;
+  for (const path of paths) {
+    try {
+      const res = await ghlFetch(path, { method: "GET" });
+      best = Math.max(best, readTicketNumberFromRecord(res));
+    } catch (err) {
+      console.warn(`GHL payment lookup skipped ${path}:`, (err as Error).message);
+    }
+  }
+  return best;
+}
+
 export const lookupGhlContactByEmail = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => lookupSchema.parse(d))
   .handler(async ({ data }) => {
