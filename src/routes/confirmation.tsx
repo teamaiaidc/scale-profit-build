@@ -1,201 +1,37 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useServerFn } from "@tanstack/react-start";
-import { useEffect, useRef, useState } from "react";
-import { CheckCircle2, Loader2, Check } from "lucide-react";
+import { CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { addAttendeesToGhl, getGhlTicketQuantityByEmail } from "@/lib/ghl.functions";
 import { normalizeCity } from "@/lib/city";
 import logo from "@/assets/hero-banner.webp";
 
 type Search = {
   city?: string;
   tier?: string;
-  qty?: number;
-  email?: string;
-  firstName?: string;
-  lastName?: string;
-  endDate?: string;
 };
 
 const isMergeTag = (value?: string) => !value || /{{|}}/.test(value);
 const clean = (value: unknown) =>
   typeof value === "string" && value.trim() && !isMergeTag(value) ? value.trim() : undefined;
-const parseTicketQty = (value: unknown) => {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value !== "string") return 1;
-  if (isMergeTag(value)) return 1;
-  const match = value.match(/\d+/);
-  return match ? Number(match[0]) : 1;
-};
-const clampTicketQty = (value: number) => Math.min(Math.max(Math.trunc(value), 1), 20);
-const TICKET_LOOKUP_INITIAL_DELAY_MS = 15000;
-const TICKET_LOOKUP_INTERVAL_MS = 5000;
-const TICKET_LOOKUP_MAX_WAIT_MS = 75000;
-
-const updateUrlQty = (qty: number) => {
-  if (typeof window === "undefined" || qty <= 1) return;
-  const url = new URL(window.location.href);
-  url.searchParams.set("qty", String(qty));
-  window.history.replaceState(null, "", url);
-};
-
 
 export const Route = createFileRoute("/confirmation")({
-  validateSearch: (s: Record<string, unknown>): Search => {
-    const str = (a: unknown, b: unknown) => clean(a) ?? clean(b);
-    const ticketValue =
-      s.qty ??
-      s.sp_no_of_ticket_purchased ??
-      s["contact.sp_no_of_ticket_purchased"] ??
-      s.ticket_quantity;
-    return {
-      city: normalizeCity(s.event_city) ?? normalizeCity(s.eventCity) ?? normalizeCity(s.city) ?? "boston",
-      tier: s.tier === "vip" ? "vip" : "ga",
-      qty: clampTicketQty(parseTicketQty(ticketValue)),
-      email: clean(s.email),
-      // Accept camelCase or snake_case (GHL merge fields use snake_case).
-      firstName: str(s.firstName, s.first_name),
-      lastName: str(s.lastName, s.last_name),
-      endDate: str(s.endDate, s.end_date),
-    };
-  },
+  validateSearch: (s: Record<string, unknown>): Search => ({
+    city:
+      normalizeCity(s.event_city) ??
+      normalizeCity(s.eventCity) ??
+      normalizeCity(s.city) ??
+      "boston",
+    tier: s.tier === "vip" ? "vip" : "ga",
+  }),
   head: () => ({
     meta: [{ title: "Purchase Confirmed — Scale & Profit Seminar" }],
   }),
   component: ConfirmationPage,
 });
 
-type Attendee = { firstName: string; lastName: string; email: string };
-
 function ConfirmationPage() {
-  const { city, tier, qty, email, firstName, lastName, endDate } = Route.useSearch();
+  const { tier } = Route.useSearch();
   const isVip = tier === "vip";
-  const initialQty = qty ?? 1;
-
-  const [ready, setReady] = useState(false);
-  const [ticketCount, setTicketCount] = useState(() => (isVip ? 1 : initialQty));
-  const getTicketQty = useServerFn(getGhlTicketQuantityByEmail);
-  const getTicketQtyRef = useRef(getTicketQty);
-
-  useEffect(() => {
-    getTicketQtyRef.current = getTicketQty;
-  }, [getTicketQty]);
-
-  // Buffer for the GHL workflow, then poll the buyer contact field
-  // {{contact.sp_no_of_ticket_purchased}} by email. The URL `qty` is only a
-  // fallback because GHL can redirect before the merge tag updates.
-  useEffect(() => {
-    let active = true;
-    setReady(false);
-    const urlQty =
-      typeof window === "undefined"
-        ? 1
-        : Math.max(
-            ...["qty", "sp_no_of_ticket_purchased", "contact.sp_no_of_ticket_purchased", "ticket_quantity"].map(
-              (key) => parseTicketQty(new URLSearchParams(window.location.search).get(key)),
-            ),
-          );
-    const trustedInitialQty = clampTicketQty(Math.max(initialQty, urlQty));
-    if (isVip) {
-      setTicketCount(1);
-      setReady(true);
-      return () => {
-        active = false;
-      };
-    }
-    if (trustedInitialQty > 1) {
-      setTicketCount(trustedInitialQty);
-      setReady(true);
-      return () => {
-        active = false;
-      };
-    }
-
-    const t = setTimeout(async () => {
-      let nextQty = trustedInitialQty;
-      if (email) {
-        const startedAt = Date.now();
-        while (active && Date.now() - startedAt < TICKET_LOOKUP_MAX_WAIT_MS) {
-          try {
-            const result = await getTicketQtyRef.current({ data: { email } });
-            if (result.quantity > 1) {
-              nextQty = result.quantity;
-              updateUrlQty(nextQty);
-              break;
-            }
-          } catch (err) {
-            console.warn("Ticket quantity lookup failed:", err);
-          }
-          await new Promise((resolve) => setTimeout(resolve, TICKET_LOOKUP_INTERVAL_MS));
-        }
-      }
-      if (active) {
-        setTicketCount(clampTicketQty(nextQty));
-        setReady(true);
-      }
-    }, TICKET_LOOKUP_INITIAL_DELAY_MS);
-
-    return () => {
-      active = false;
-      clearTimeout(t);
-    };
-  }, [isVip, email, initialQty]);
-
-  const addAttendees = useServerFn(addAttendeesToGhl);
-
-  const [attendees, setAttendees] = useState<Attendee[]>(() =>
-    Array.from({ length: ticketCount }, (_, i) => ({
-      firstName: i === 0 ? (firstName ?? "") : "",
-      lastName: i === 0 ? (lastName ?? "") : "",
-      email: i === 0 ? (email ?? "") : "",
-    })),
-  );
-
-  // Re-size the attendee array whenever ticketCount changes, preserving filled rows.
-  useEffect(() => {
-    setAttendees((prev) => {
-      if (prev.length === ticketCount) return prev;
-      const next = Array.from(
-        { length: ticketCount },
-        (_, i) =>
-          prev[i] ?? {
-            firstName: i === 0 ? (firstName ?? "") : "",
-            lastName: i === 0 ? (lastName ?? "") : "",
-            email: i === 0 ? (email ?? "") : "",
-          },
-      );
-      return next;
-    });
-  }, [ticketCount, firstName, lastName, email]);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const setRow = (i: number, key: keyof Attendee, value: string) =>
-    setAttendees((prev) => prev.map((a, idx) => (idx === i ? { ...a, [key]: value } : a)));
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (attendees.some((a) => !a.firstName.trim() || !a.lastName.trim() || !a.email.trim())) {
-      setError("Please fill in every attendee's name and email.");
-      return;
-    }
-    setError(null);
-    setSaving(true);
-    try {
-      await addAttendees({
-        data: { city: city ?? "boston", tier: tier ?? "ga", endDate, attendees },
-      });
-      setSaved(true);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
-    } finally {
-      setSaving(false);
-    }
-  };
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -213,130 +49,37 @@ function ConfirmationPage() {
           <h1 className="mt-6 text-4xl font-black md:text-5xl">
             Congratulations — Your Purchase Is Confirmed!
           </h1>
-          {tier === "vip" ? (
-            <>
-              <p className="mt-4 text-lg font-semibold text-primary">
-                You're in for the VIP Experience.
-              </p>
-              <p className="mt-2 text-muted-foreground">
-                Beyond full access to both days, your VIP ticket includes the exclusive VIP dinner
-                with David &amp; Al, preferred seating, a curated swag bag, your VIP name badge, and
-                a 90-minute implementation call. A confirmation email with all the details is on its
-                way.
-              </p>
-            </>
+          {isVip ? (
+            <p className="mt-6 text-muted-foreground">
+              You're in for the VIP Experience — full access to both days, the exclusive VIP dinner
+              with David &amp; Al, preferred seating, a curated swag bag, your VIP name badge, and a
+              90-minute implementation call. A confirmation email with all the details is on its
+              way.
+            </p>
           ) : (
-            <>
-              <p className="mt-4 text-lg font-semibold text-primary">
-                You're booked for General Admission.
-              </p>
-              <p className="mt-2 text-muted-foreground">
-                You've got full access to both days of the Scale &amp; Profit Seminar. A
-                confirmation email with event details, your workbook, and travel info is on its way.
-              </p>
-            </>
+            <p className="mt-6 text-muted-foreground">
+              You've got full access to both days of the Scale &amp; Profit Seminar. A confirmation
+              email with event details, your workbook, and travel info is on its way.
+            </p>
           )}
         </div>
 
-        {/* GA: wait so GHL can populate {{contact.sp_no_of_ticket_purchased}} */}
-        {!isVip && !ready && (
-          <Card className="mt-10 flex items-center gap-3 p-6">
-            <Loader2 className="h-6 w-6 shrink-0 animate-spin text-primary" />
-            <div>
-              <p className="font-semibold">Finalizing your order…</p>
-              <p className="text-sm text-muted-foreground">
-                Hang tight while we confirm your ticket count. This can take up to 90 seconds.
-              </p>
-            </div>
-          </Card>
-        )}
-
-        {/* GA: one attendee form per purchased ticket */}
-        {!isVip && ready && !saved && (
-          <Card className="mt-10 p-6">
-            <h2 className="text-xl font-bold">
-              Register your {ticketCount === 1 ? "attendee" : `${ticketCount} attendees`}
-            </h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {ticketCount === 1
-                ? "Please confirm your attendee details below."
-                : `You purchased ${ticketCount} tickets — please fill in details for each attendee.`}
-            </p>
-
-            <form onSubmit={handleSubmit} className="mt-6 space-y-5" suppressHydrationWarning>
-              {attendees.map((a, i) => (
-                <div key={i} className="space-y-3 rounded-lg border border-border p-4">
-                  <p className="text-sm font-semibold text-primary">
-                    Attendee {i + 1}
-                    {i === 0 ? " (you)" : ""}
-                  </p>
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <div className="space-y-1.5">
-                      <Label className="text-xs uppercase tracking-wide text-muted-foreground">
-                        First name
-                      </Label>
-                      <Input
-                        required
-                        value={a.firstName}
-                        onChange={(e) => setRow(i, "firstName", e.target.value)}
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs uppercase tracking-wide text-muted-foreground">
-                        Last name
-                      </Label>
-                      <Input
-                        required
-                        value={a.lastName}
-                        onChange={(e) => setRow(i, "lastName", e.target.value)}
-                      />
-                    </div>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs uppercase tracking-wide text-muted-foreground">
-                      Email
-                    </Label>
-                    <Input
-                      type="email"
-                      required
-                      value={a.email}
-                      onChange={(e) => setRow(i, "email", e.target.value)}
-                    />
-                  </div>
-                </div>
-              ))}
-              {error && <p className="text-sm text-destructive">{error}</p>}
-              <Button type="submit" className="w-full" disabled={saving}>
-                {saving ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Saving attendees…
-                  </>
-                ) : (
-                  "Submit Attendee Details"
-                )}
-              </Button>
-            </form>
-          </Card>
-        )}
-
-        {!isVip && saved && (
-          <Card className="mt-10 flex items-center gap-3 p-6">
-            <Check className="h-6 w-6 shrink-0 text-primary" />
-            <div>
-              <p className="font-semibold">
-                {ticketCount === 1
-                  ? "Attendee details saved!"
-                  : `All ${ticketCount} attendees saved!`}
-              </p>
-              <p className="text-sm text-muted-foreground">
-                Each attendee will receive their own confirmation. See you at the seminar.
-              </p>
-            </div>
-          </Card>
-        )}
+        <Card className="mt-10 p-6 text-center">
+          <h2 className="text-xl font-bold text-primary">What to do next:</h2>
+          <p className="mt-3 text-muted-foreground">
+            If you purchase multiple general admission tickets, please reach out to{" "}
+            <a
+              href="mailto:Mallory@coachpconsulting.com"
+              className="font-semibold text-foreground underline underline-offset-4"
+            >
+              Mallory@coachpconsulting.com
+            </a>{" "}
+            to provide your additional attendee's information. Thanks!
+          </p>
+        </Card>
 
         <div className="mt-10 text-center">
-          <Button asChild size="lg" variant={!isVip && !saved ? "outline" : "default"}>
+          <Button asChild size="lg">
             <Link to="/">Back to event details</Link>
           </Button>
         </div>
