@@ -37,6 +37,7 @@ import { listEvents, verifyAdminPassword } from "@/lib/events.functions";
 import {
   listSeminarPurchasers,
   getPurchaserDetail,
+  addAttendeesToGhl,
   type SeminarPurchaser,
   type PurchaserDetail,
 } from "@/lib/ghl.functions";
