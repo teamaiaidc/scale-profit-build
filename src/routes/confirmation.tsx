@@ -86,6 +86,15 @@ function ConfirmationPage() {
   useEffect(() => {
     let active = true;
     setReady(false);
+    const urlQty =
+      typeof window === "undefined"
+        ? 1
+        : Math.max(
+            ...["qty", "sp_no_of_ticket_purchased", "contact.sp_no_of_ticket_purchased", "ticket_quantity"].map(
+              (key) => parseTicketQty(new URLSearchParams(window.location.search).get(key)),
+            ),
+          );
+    const trustedInitialQty = clampTicketQty(Math.max(initialQty, urlQty));
     if (isVip) {
       setTicketCount(1);
       setReady(true);
@@ -93,9 +102,16 @@ function ConfirmationPage() {
         active = false;
       };
     }
+    if (trustedInitialQty > 1) {
+      setTicketCount(trustedInitialQty);
+      setReady(true);
+      return () => {
+        active = false;
+      };
+    }
 
     const t = setTimeout(async () => {
-      let nextQty = initialQty;
+      let nextQty = trustedInitialQty;
       if (email) {
         for (let attempt = 0; attempt < 6; attempt += 1) {
           try {
@@ -104,7 +120,7 @@ function ConfirmationPage() {
               nextQty = result.quantity;
               break;
             }
-            if (result.found && initialQty > 1) break;
+            if (result.found && trustedInitialQty > 1) break;
           } catch (err) {
             console.warn("Ticket quantity lookup failed:", err);
           }
