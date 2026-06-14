@@ -747,7 +747,7 @@ async function fetchOpportunityTicketCount(contactId: string): Promise<number> {
   const oppMeta = await getFieldMeta("opportunity");
   let ticketFieldId = "";
   for (const [id, m] of oppMeta) {
-    if (m.key === OPP_FIELD_KEYS.ticketsPurchased) {
+    if (m.key === OPP_FIELD_KEYS.ticketsPurchased || m.key === OPP_FIELD_KEYS.ticketsPurchasedLegacy) {
       ticketFieldId = id;
       break;
     }
@@ -770,8 +770,8 @@ async function fetchOpportunityTicketCount(contactId: string): Promise<number> {
     for (const o of res.opportunities ?? []) {
       for (const f of o.customFields ?? []) {
         if (ticketFieldId && f.id !== ticketFieldId) continue;
-        const raw = f.fieldValueString ?? f.fieldValue ?? f.field_value ?? "";
-        const n = Number.parseInt(String(raw), 10);
+        const raw = readCustomFieldValue(f);
+        const n = readTicketNumber(raw);
         if (Number.isFinite(n) && n > best) best = n;
       }
     }
