@@ -521,7 +521,7 @@ function CheckoutPage() {
                 ))}
               </div>
 
-              <form onSubmit={(e) => e.preventDefault()} className="space-y-5">
+              <form onSubmit={(e) => e.preventDefault()} className="space-y-5" suppressHydrationWarning>
                 {step === 1 && (
                   <>
                     <div className="grid gap-4 md:grid-cols-2">
