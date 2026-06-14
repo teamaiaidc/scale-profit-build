@@ -7,6 +7,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { addAttendeesToGhl, getGhlTicketQuantityByEmail } from "@/lib/ghl.functions";
+import { normalizeCity } from "@/lib/city";
 import logo from "@/assets/hero-banner.webp";
 
 type Search = {
@@ -30,14 +31,7 @@ const parseTicketQty = (value: unknown) => {
   return match ? Number(match[0]) : 1;
 };
 const clampTicketQty = (value: number) => Math.min(Math.max(Math.trunc(value), 1), 20);
-const normalizeCity = (value: unknown) => {
-  const raw = clean(value)?.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-  if (!raw) return undefined;
-  if (/california|los-angeles|la|orange-county|san-diego|san-francisco/.test(raw)) return "california";
-  if (/nashville|tennessee|tn/.test(raw)) return "nashville";
-  if (/boston|massachusetts|ma/.test(raw)) return "boston";
-  return raw;
-};
+
 
 export const Route = createFileRoute("/confirmation")({
   validateSearch: (s: Record<string, unknown>): Search => {
