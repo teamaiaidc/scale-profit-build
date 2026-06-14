@@ -801,6 +801,8 @@ async function fetchOpportunityTicketCount(contactId: string): Promise<number> {
       { method: "GET" },
     )) as {
       opportunities?: Array<{
+        name?: string;
+        monetaryValue?: number | string;
         customFields?: Array<{
           id?: string;
           fieldValueString?: string;
@@ -811,6 +813,11 @@ async function fetchOpportunityTicketCount(contactId: string): Promise<number> {
     };
     let best = 0;
     for (const o of res.opportunities ?? []) {
+      best = Math.max(
+        best,
+        readTicketNumberFromText(o.name),
+        readTicketNumberFromAmount(o.monetaryValue),
+      );
       for (const f of o.customFields ?? []) {
         if (ticketFieldId && f.id !== ticketFieldId) continue;
         const raw = readCustomFieldValue(f);
