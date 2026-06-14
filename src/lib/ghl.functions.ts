@@ -243,6 +243,21 @@ type GhlContactSnapshot = {
 
 const lookupSchema = z.object({ email: z.string().email().max(200) });
 
+function readTicketNumber(value: unknown): number {
+  const match = String(value ?? "").match(/\d+/);
+  const qty = match ? Number(match[0]) : 0;
+  return Number.isFinite(qty) ? Math.min(Math.max(Math.trunc(qty), 0), 20) : 0;
+}
+
+function readCustomFieldValue(field: {
+  value?: unknown;
+  fieldValueString?: unknown;
+  fieldValue?: unknown;
+  field_value?: unknown;
+}): unknown {
+  return field.value ?? field.fieldValueString ?? field.fieldValue ?? field.field_value ?? "";
+}
+
 export const lookupGhlContactByEmail = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => lookupSchema.parse(d))
   .handler(async ({ data }) => {
