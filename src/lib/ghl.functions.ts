@@ -1083,7 +1083,7 @@ export const listSeminarPurchasers = createServerFn({ method: "POST" })
           isAttendee,
           dateAdded: c.dateAdded ?? "",
         };
-      }),
+      },
     );
 
     return { purchasers, error: searchError };
