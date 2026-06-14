@@ -686,9 +686,9 @@ type RawSearchContact = {
   opportunities?: Array<{ monetaryValue?: number }>;
 };
 
-// GHL field keys come back as `contact.<key>`; we compare against the bare key.
+// GHL field keys come back as `contact.<key>` / `opportunity.<key>`; compare bare keys.
 function bareFieldKey(key: string): string {
-  return key.replace(/^contact\./, "");
+  return key.replace(/^(contact|opportunity)\./, "");
 }
 
 // Work out which event a contact belongs to. Buyers carry a `scale-profit-{slug}`
