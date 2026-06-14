@@ -344,25 +344,75 @@ function readTicketNumberFromRecord(value: unknown): number {
   return best;
 }
 
-async function fetchPaymentTicketCount(contactId: string, email: string): Promise<number> {
+function paymentLookupPaths(contactId: string, email: string): string[] {
   const params = [
     `locationId=${GHL_LOCATION_ID}&contactId=${encodeURIComponent(contactId)}&limit=50`,
     `altId=${GHL_LOCATION_ID}&altType=location&contactId=${encodeURIComponent(contactId)}&limit=50`,
-    `locationId=${GHL_LOCATION_ID}&email=${encodeURIComponent(email)}&limit=50`,
-    `altId=${GHL_LOCATION_ID}&altType=location&email=${encodeURIComponent(email)}&limit=50`,
   ];
-  const paths = params.flatMap((query) => [
+  if (email) {
+    params.push(
+      `locationId=${GHL_LOCATION_ID}&email=${encodeURIComponent(email)}&limit=50`,
+      `altId=${GHL_LOCATION_ID}&altType=location&email=${encodeURIComponent(email)}&limit=50`,
+    );
+  }
+  return params.flatMap((query) => [
     `/payments/orders?${query}`,
     `/payments/transactions?${query}`,
   ]);
+}
 
+async function fetchPaymentTicketCount(contactId: string, email: string): Promise<number> {
   let best = 0;
-  for (const path of paths) {
+  for (const path of paymentLookupPaths(contactId, email)) {
     try {
       const res = await ghlFetch(path, { method: "GET" });
       best = Math.max(best, readTicketNumberFromRecord(res));
     } catch (err) {
       console.warn(`GHL payment lookup skipped ${path}:`, (err as Error).message);
+    }
+  }
+  return best;
+}
+
+// Walk a payment-orders / payment-transactions payload and find the largest
+// monetary amount on a top-level numeric field named like amount/total/price.
+// GHL returns major units for these endpoints; we normalize cents-shaped
+// numbers (> 10000) just in case the schema ever changes.
+function readPaymentAmountFromRecord(value: unknown): number {
+  let best = 0;
+  const seen = new Set<unknown>();
+  const scan = (node: unknown, keyHint = "") => {
+    if (node === null || node === undefined || seen.has(node)) return;
+    if (typeof node === "number" || typeof node === "string") {
+      if (/^(amount|amountPaid|total|subtotal|grandTotal|amountDue)$/i.test(keyHint)) {
+        const n = Number(node);
+        if (Number.isFinite(n) && n > 0) {
+          const normalized = n > 10000 ? n / 100 : n;
+          if (normalized > best) best = normalized;
+        }
+      }
+      return;
+    }
+    if (typeof node !== "object") return;
+    seen.add(node);
+    if (Array.isArray(node)) {
+      for (const item of node) scan(item, keyHint);
+      return;
+    }
+    for (const [k, v] of Object.entries(node as Record<string, unknown>)) scan(v, k);
+  };
+  scan(value);
+  return best;
+}
+
+async function fetchPaymentAmount(contactId: string, email: string): Promise<number> {
+  let best = 0;
+  for (const path of paymentLookupPaths(contactId, email)) {
+    try {
+      const res = await ghlFetch(path, { method: "GET" });
+      best = Math.max(best, readPaymentAmountFromRecord(res));
+    } catch (err) {
+      console.warn(`GHL payment amount lookup skipped ${path}:`, (err as Error).message);
     }
   }
   return best;
@@ -975,31 +1025,47 @@ export const listSeminarPurchasers = createServerFn({ method: "POST" })
       console.warn("GHL purchaser search failed:", searchError);
     }
 
-    const purchasers: SeminarPurchaser[] = rawContacts.map((c) => {
-      const tags = (c.tags ?? []).map((t) => String(t));
-      // Indicative amount = the largest opportunity value on the contact.
-      const amount = (c.opportunities ?? []).reduce(
-        (m, o) => Math.max(m, Number(o.monetaryValue) || 0),
-        0,
-      );
-      return {
-        id: String(c.id ?? c.contactId ?? ""),
-        firstName: c.firstName ?? "",
-        lastName: c.lastName ?? "",
-        name: [c.firstName, c.lastName].filter(Boolean).join(" ").trim(),
-        email: c.email ?? "",
-        phone: c.phone ?? "",
-        state: c.state ?? "",
-        tags,
-        eventSlug: deriveEventSlug(tags),
-        tier: deriveTier(tags),
-        ticketQuantity: 1,
-        amount,
-        source: c.source ?? "",
-        isAttendee: tags.includes("scale-profit-attendee"),
-        dateAdded: c.dateAdded ?? "",
-      };
-    });
+    const purchasers: SeminarPurchaser[] = await Promise.all(
+      rawContacts.map(async (c) => {
+        const tags = (c.tags ?? []).map((t) => String(t));
+        const isAttendee = tags.includes("scale-profit-attendee");
+        // Indicative amount from the opportunity. This is set at survey-time
+        // with a default qty of 1, so for GA buyers it's almost always wrong.
+        const oppAmount = (c.opportunities ?? []).reduce(
+          (m, o) => Math.max(m, Number(o.monetaryValue) || 0),
+          0,
+        );
+        // For buyers, prefer the real amount from /payments/orders /
+        // /payments/transactions. Skip for attendees (they never paid).
+        const contactId = String(c.id ?? c.contactId ?? "");
+        let amount = oppAmount;
+        if (!isAttendee && contactId) {
+          try {
+            const paid = await fetchPaymentAmount(contactId, c.email ?? "");
+            if (paid > 0) amount = paid;
+          } catch (err) {
+            console.warn("GHL paid-amount lookup failed:", (err as Error).message);
+          }
+        }
+        return {
+          id: contactId,
+          firstName: c.firstName ?? "",
+          lastName: c.lastName ?? "",
+          name: [c.firstName, c.lastName].filter(Boolean).join(" ").trim(),
+          email: c.email ?? "",
+          phone: c.phone ?? "",
+          state: c.state ?? "",
+          tags,
+          eventSlug: deriveEventSlug(tags),
+          tier: deriveTier(tags),
+          ticketQuantity: 1,
+          amount,
+          source: c.source ?? "",
+          isAttendee,
+          dateAdded: c.dateAdded ?? "",
+        };
+      }),
+    );
 
     return { purchasers, error: searchError };
   });
