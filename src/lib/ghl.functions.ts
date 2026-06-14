@@ -129,6 +129,7 @@ export const submitCheckoutToGhl = createServerFn({ method: "POST" })
         customFields: [
           { key: FIELD_KEYS.eventCity, field_value: data.city },
           { key: FIELD_KEYS.ticketTier, field_value: tierLabel },
+          { key: FIELD_KEYS.ticketQuantity, field_value: String(data.quantity) },
           { key: FIELD_KEYS.ticketQuantityLegacy, field_value: String(data.quantity) },
           { key: FIELD_KEYS.orderAmount, field_value: String(data.amount) },
           ...(data.survey
@@ -142,10 +143,9 @@ export const submitCheckoutToGhl = createServerFn({ method: "POST" })
       }),
     }) as Promise<{ contact?: { id?: string }; id?: string }>;
 
-    const pipelinesPromise = ghlFetch(
-      `/opportunities/pipelines?locationId=${GHL_LOCATION_ID}`,
-      { method: "GET" },
-    ).catch((err) => {
+    const pipelinesPromise = ghlFetch(`/opportunities/pipelines?locationId=${GHL_LOCATION_ID}`, {
+      method: "GET",
+    }).catch((err) => {
       console.warn("GHL pipelines fetch failed:", (err as Error).message);
       return null;
     }) as Promise<{ pipelines?: Array<{ id: string; stages?: Array<{ id: string }> }> } | null>;
@@ -443,7 +443,11 @@ export const listGhlProducts = createServerFn({ method: "GET" }).handler(
 // Each ticket becomes its own attendee contact, collected on the confirmation
 // page after payment (when the real ticket count is known).
 const addAttendeesSchema = z.object({
-  city: z.string().min(1).max(50),
+  city: z
+    .string()
+    .max(50)
+    .optional()
+    .transform((v) => (v?.trim() ? v.trim() : "boston")),
   tier: z.enum(["ga", "vip"]),
   // ISO end date (YYYY-MM-DD); falls back to the slug's default if omitted.
   endDate: z.string().max(20).optional(),
