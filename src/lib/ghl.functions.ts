@@ -320,8 +320,8 @@ export const getGhlTicketQuantityCustomValue = createServerFn({ method: "GET" })
       console.warn("GHL location custom value fetch failed:", (err as Error).message);
       return { quantity: 1, raw: "", found: false };
     }
-  });
-  });
+  },
+);
 
 const pushSchema = z.object({
   contactId: z.string().min(1).max(100),
