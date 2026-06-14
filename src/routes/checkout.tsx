@@ -34,10 +34,29 @@ export const Route = createFileRoute("/checkout")({
       { name: "description", content: "Reserve your seat at the Scale & Profit Seminar." },
     ],
   }),
-  loader: async () => ({
-    events: await listEvents(),
-    ghlProducts: (await listGhlProducts()).products,
-  }),
+  loader: async () => {
+    const [eventsResult, productsResult] = await Promise.allSettled([
+      listEvents(),
+      listGhlProducts(),
+    ]);
+    const events =
+      eventsResult.status === "fulfilled" ? eventsResult.value : [];
+    const ghlProducts =
+      productsResult.status === "fulfilled" ? productsResult.value.products : [];
+    if (productsResult.status === "rejected") {
+      console.warn(
+        "[checkout loader] listGhlProducts failed, falling back to built-in pricing:",
+        (productsResult.reason as Error)?.message,
+      );
+    }
+    if (eventsResult.status === "rejected") {
+      console.warn(
+        "[checkout loader] listEvents failed, falling back to defaults:",
+        (eventsResult.reason as Error)?.message,
+      );
+    }
+    return { events, ghlProducts };
+  },
   component: CheckoutPage,
 });
 
