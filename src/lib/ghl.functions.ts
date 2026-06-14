@@ -444,7 +444,11 @@ export const listGhlProducts = createServerFn({ method: "GET" }).handler(
 // Each ticket becomes its own attendee contact, collected on the confirmation
 // page after payment (when the real ticket count is known).
 const addAttendeesSchema = z.object({
-  city: z.string().min(1).max(50),
+  city: z
+    .string()
+    .max(50)
+    .optional()
+    .transform((v) => (v?.trim() ? v.trim() : "boston")),
   tier: z.enum(["ga", "vip"]),
   // ISO end date (YYYY-MM-DD); falls back to the slug's default if omitted.
   endDate: z.string().max(20).optional(),
