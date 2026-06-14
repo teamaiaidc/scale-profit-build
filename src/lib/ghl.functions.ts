@@ -347,7 +347,13 @@ export const getGhlTicketQuantityByEmail = createServerFn({ method: "POST" })
       const contactRes = (await ghlFetch(
         `/contacts/?locationId=${GHL_LOCATION_ID}&query=${encodeURIComponent(data.email)}`,
         { method: "GET" },
-      )) as { contacts?: Array<{ id?: string; email?: string; customFields?: Array<{ id?: string; value?: unknown; field_value?: unknown }> }> };
+      )) as {
+        contacts?: Array<{
+          id?: string;
+          email?: string;
+          customFields?: Array<{ id?: string; value?: unknown; field_value?: unknown }>;
+        }>;
+      };
       const contact = contactRes.contacts?.find(
         (c) => c.email?.toLowerCase() === data.email.toLowerCase(),
       );
@@ -747,7 +753,10 @@ async function fetchOpportunityTicketCount(contactId: string): Promise<number> {
   const oppMeta = await getFieldMeta("opportunity");
   let ticketFieldId = "";
   for (const [id, m] of oppMeta) {
-    if (m.key === OPP_FIELD_KEYS.ticketsPurchased || m.key === OPP_FIELD_KEYS.ticketsPurchasedLegacy) {
+    if (
+      m.key === OPP_FIELD_KEYS.ticketsPurchased ||
+      m.key === OPP_FIELD_KEYS.ticketsPurchasedLegacy
+    ) {
       ticketFieldId = id;
       break;
     }
