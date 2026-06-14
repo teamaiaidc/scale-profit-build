@@ -282,7 +282,7 @@ function Index() {
             <img
               src={davidImg}
               alt="David Peterson (Coach P)"
-              className="mb-5 h-48 w-48 rounded-full object-cover"
+              className="mb-5 mx-auto h-40 w-40 rounded-full object-cover sm:mx-0 sm:h-48 sm:w-48"
             />
             <h3 className="text-2xl font-bold">David Peterson (Coach P)</h3>
             <p className="mt-1 italic text-primary">Systems & Team Building Expert</p>
