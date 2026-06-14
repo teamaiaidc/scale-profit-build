@@ -478,9 +478,7 @@ export const getGhlTicketQuantityByEmail = createServerFn({ method: "POST" })
           }
         }
       }
-      if (fieldQty > 1 || (fieldQty === 1 && fallbackQty <= 1)) {
-        return { quantity: fieldQty, raw, found: true };
-      }
+      if (fieldQty > 1) return { quantity: fieldQty, raw, found: true };
       if (fallbackQty > 1) return { quantity: fallbackQty, raw: String(fallbackQty), found: true };
 
       const paymentQty = await fetchPaymentTicketCount(contactId, data.email);
