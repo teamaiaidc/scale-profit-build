@@ -33,7 +33,7 @@ for each (any field type, but match the key):
 > The three survey custom-field keys above must match **exactly** (they're the part
 > after `contact.` in the merge tag, e.g. `{{contact.do_you_have_a_moa_1}}`).
 >
-> **Ticket count** is tracked on the **opportunity**, not the contact — see §3 and §6.
+> **Ticket count** is tracked on the **contact** field `sp_no_of_ticket_purchased` — see §3 and §6.
 
 ## 2. Tags applied to the buyer contact
 
@@ -49,14 +49,14 @@ Contact **source**: `Scale & Profit Seminar Checkout`
 - Created in the **first pipeline / first stage** in the location.
 - Name: `First Last — {tier} ({city})`
 - `monetaryValue` = order amount, status `open`.
-- Opportunity custom field **`sp_no_of_ticket_purchased`**
-  (`{{opportunity.sp_no_of_ticket_purchased}}`) is set to the ticket count.
+- Contact custom field **`sp_no_of_ticket_purchased`**
+  (`{{contact.sp_no_of_ticket_purchased}}`) is set to the ticket count.
 
-> ⚠️ **Ticket count = 1 at creation.** The site creates the opportunity *before*
-> payment, where the real quantity isn't known yet, so it writes `1`. The real
-> count is chosen inside the GHL payment form — your automation must **overwrite
-> `{{opportunity.sp_no_of_ticket_purchased}}` with the real quantity** after the
-> charge (see §6). The site's admin "Attendees" view reads whatever this field holds.
+> ⚠️ **Ticket count may still be 1 before payment finishes.** The real count is
+> chosen inside the GHL payment form — your automation must **write
+> `{{contact.sp_no_of_ticket_purchased}}` with the real quantity** after the
+> charge (see §6). The confirmation page waits/polls this contact field before
+> rendering the attendee forms.
 
 ## 4. Embedded payment forms (Step 2)
 
@@ -88,24 +88,25 @@ The one that matters for tracking is **`event_city`** — add it as a hidden fie
 ## 6. Tracking ticket quantity (multiple tickets) + the loop page
 
 **Important:** quantity is chosen **inside the GHL payment form**, not on the site.
-The real count must be written into the **opportunity** field
-`sp_no_of_ticket_purchased` (`{{opportunity.sp_no_of_ticket_purchased}}`). The site
-seeds this field with `1` when it creates the opportunity pre-payment; your
-automation overwrites it with the real number.
+The real count must be written into the buyer **contact** field
+`sp_no_of_ticket_purchased` (`{{contact.sp_no_of_ticket_purchased}}`). If this
+field is still `1` when GHL redirects, the site now waits and polls the buyer
+contact for up to 90 seconds before showing the attendee forms.
 
 **Set it up:** add a "Number of Tickets" selector (dropdown 1–5, or the product
 quantity field) to each payment form, then in the **post-payment automation** map
-that value onto the buyer's opportunity field `sp_no_of_ticket_purchased`. Now
-`{{opportunity.sp_no_of_ticket_purchased}}` holds the true per-buyer count, and the
-site's admin "Attendees" view displays it.
+that value onto the buyer contact field `sp_no_of_ticket_purchased`. Now
+`{{contact.sp_no_of_ticket_purchased}}` holds the true per-buyer count, and the
+confirmation page reads it before displaying attendee fields.
 
 ### Driving the post-purchase "loop" confirmation page
 
 **Goal:** each ticket becomes its own **attendee record** (a separate GHL contact).
 
-1. In the payment form's **On-Submit redirect**, send the buyer to the confirmation
-   page (`/confirmation`) with the count + identity, e.g.
-   `https://<site>/confirmation?qty={{opportunity.sp_no_of_ticket_purchased}}&city={{contact.event_city}}&tier=vip&email={{contact.email}}&first_name={{contact.first_name}}&last_name={{contact.last_name}}`
+1. In the payment form's **On-Submit redirect**, send the buyer to the buffer
+   page (`/confirmation-buffer`) with the count + identity. The buffer waits for
+   `{{contact.sp_no_of_ticket_purchased}}`, then forwards to `/confirmation`, e.g.
+   `https://<site>/confirmation-buffer?qty={{contact.sp_no_of_ticket_purchased}}&city={{contact.event_city}}&tier=ga&email={{contact.email}}&first_name={{contact.first_name}}&last_name={{contact.last_name}}`
 2. The page reads `qty` and **renders one attendee form per ticket** (it scales
    automatically). Attendee #1 is **pre-filled** with the buyer's name + email so they
    can confirm they're attending (or edit it).
@@ -127,7 +128,7 @@ site's admin "Attendees" view displays it.
 - ✅ Add the **hidden `event_city` field** (and any others you want recorded) to both
   payment forms — §4.
 - ✅ Add a **"Number of Tickets" selector** to each payment form and, in the
-  post-payment automation, map it to the **opportunity** field
+  post-payment automation, map it to the buyer **contact** field
   `sp_no_of_ticket_purchased` — §6.
 - ✅ Provide the **confirmation/loop page URL** once built, and set it as the form's
   on-submit redirect — §6.

@@ -280,6 +280,31 @@ function readCustomFieldValue(field: {
   return field.value ?? field.fieldValueString ?? field.fieldValue ?? field.field_value ?? "";
 }
 
+function isTicketQuantityField(meta?: { name?: string; key?: string }): boolean {
+  const key = bareFieldKey(meta?.key ?? "").toLowerCase();
+  const label = `${key} ${meta?.name ?? ""}`.toLowerCase().replace(/[^a-z0-9]+/g, "_");
+  return (
+    key === FIELD_KEYS.ticketQuantity ||
+    key === FIELD_KEYS.ticketQuantityLegacy ||
+    key === FIELD_KEYS.ticketQuantityLegacy2 ||
+    key === FIELD_KEYS.ticketQuantityLegacy3 ||
+    label.includes("sp_no_of_ticket_purchased") ||
+    label.includes("ticket_quantity") ||
+    (label.includes("ticket") && label.includes("purchased"))
+  );
+}
+
+function getInlineFieldMeta(field: unknown): { name?: string; key?: string } | undefined {
+  if (!field || typeof field !== "object") return undefined;
+  const record = field as Record<string, unknown>;
+  const key = record.key ?? record.fieldKey ?? record.field_key;
+  const name = record.name ?? record.fieldName ?? record.field_name;
+  return {
+    key: typeof key === "string" ? key : undefined,
+    name: typeof name === "string" ? name : undefined,
+  };
+}
+
 function readTicketNumberFromText(value: unknown): number {
   const text = String(value ?? "");
   const ticketMatch = text.match(/(\d+)\s*tickets?\b/i);
@@ -460,21 +485,17 @@ export const getGhlTicketQuantityByEmail = createServerFn({ method: "POST" })
       // 1. Read contact custom fields FIRST — the GHL workflow writes
       // {{contact.sp_no_of_ticket_purchased}} immediately after purchase.
       const contactMeta = await getFieldMeta();
-      const contactTicketKeys = new Set<string>([
-        FIELD_KEYS.ticketQuantity,
-        FIELD_KEYS.ticketQuantityLegacy,
-        FIELD_KEYS.ticketQuantityLegacy2,
-        FIELD_KEYS.ticketQuantityLegacy3,
-      ]);
       const contactTicketIds = new Set(
         [...contactMeta.entries()]
-          .filter(([, m]) => contactTicketKeys.has(m.key))
+          .filter(([, m]) => isTicketQuantityField(m))
           .map(([id]) => id),
       );
       let fieldQty = 0;
       let raw = "";
       for (const field of contactFields) {
-        if (contactTicketIds.size > 0 && (!field.id || !contactTicketIds.has(field.id))) continue;
+        const isKnownTicketField = Boolean(field.id && contactTicketIds.has(field.id));
+        const isInlineTicketField = isTicketQuantityField(getInlineFieldMeta(field));
+        if (!isKnownTicketField && !isInlineTicketField) continue;
         const value = readCustomFieldValue(field);
         const qty = readTicketNumber(value);
         if (qty > fieldQty) {
@@ -482,7 +503,7 @@ export const getGhlTicketQuantityByEmail = createServerFn({ method: "POST" })
           raw = String(value ?? "");
         }
       }
-      if (fieldQty > 0) return { quantity: fieldQty, raw, found: true };
+      if (fieldQty > 1) return { quantity: fieldQty, raw, found: true };
 
       // 2. Fallback: opportunity fields (legacy path)
       const oppMeta = await getFieldMeta("opportunity");
@@ -492,7 +513,7 @@ export const getGhlTicketQuantityByEmail = createServerFn({ method: "POST" })
       ]);
       const ticketFieldIds = new Set(
         [...oppMeta.entries()]
-          .filter(([, m]) => opportunityTicketKeys.has(m.key))
+          .filter(([, m]) => opportunityTicketKeys.has(m.key) || isTicketQuantityField(m))
           .map(([id]) => id),
       );
       const oppRes = (await ghlFetch(
