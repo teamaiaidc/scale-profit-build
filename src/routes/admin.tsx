@@ -320,7 +320,7 @@ function AdminPage() {
             <Lock className="h-5 w-5 text-primary" />
             <h1 className="text-xl font-bold">Admin Access</h1>
           </div>
-          <form onSubmit={unlock} className="space-y-4">
+          <form onSubmit={unlock} className="space-y-4" suppressHydrationWarning>
             <div>
               <Label htmlFor="admin-password">Password</Label>
               <Input
