@@ -18,6 +18,7 @@ const FIELD_KEYS = {
   // Fallback keys read when the primary field is not yet populated.
   ticketQuantityLegacy: "sp2026_ticket_quantity",
   ticketQuantityLegacy2: "ticket_quantity",
+  ticketQuantityLegacy3: "sp2026ticket_quantity",
   hasMoa: "do_you_have_a_moa_1",
   attendedBefore: "have_you_attended_a_scale__profit_seminar_before_1",
   shirtSize: "scale__profit_shirt_size",
@@ -444,6 +445,18 @@ export const getGhlTicketQuantityByEmail = createServerFn({ method: "POST" })
       if (!contact?.id) return { quantity: 1, raw: "", found: false };
       const contactId = contact.id;
 
+      let contactFields = contact.customFields ?? [];
+      try {
+        const detailRes = (await ghlFetch(`/contacts/${contactId}`, { method: "GET" })) as {
+          contact?: {
+            customFields?: Array<{ id?: string; value?: unknown; field_value?: unknown }>;
+          };
+        };
+        contactFields = detailRes.contact?.customFields ?? contactFields;
+      } catch (err) {
+        console.warn("GHL contact detail lookup failed:", (err as Error).message);
+      }
+
       // 1. Read contact custom fields FIRST — the GHL workflow writes
       // {{contact.sp_no_of_ticket_purchased}} immediately after purchase.
       const contactMeta = await getFieldMeta();
@@ -451,6 +464,7 @@ export const getGhlTicketQuantityByEmail = createServerFn({ method: "POST" })
         FIELD_KEYS.ticketQuantity,
         FIELD_KEYS.ticketQuantityLegacy,
         FIELD_KEYS.ticketQuantityLegacy2,
+        FIELD_KEYS.ticketQuantityLegacy3,
       ]);
       const contactTicketIds = new Set(
         [...contactMeta.entries()]
@@ -459,7 +473,7 @@ export const getGhlTicketQuantityByEmail = createServerFn({ method: "POST" })
       );
       let fieldQty = 0;
       let raw = "";
-      for (const field of contact.customFields ?? []) {
+      for (const field of contactFields) {
         if (contactTicketIds.size > 0 && (!field.id || !contactTicketIds.has(field.id))) continue;
         const value = readCustomFieldValue(field);
         const qty = readTicketNumber(value);
@@ -1008,7 +1022,8 @@ export const getPurchaserDetail = createServerFn({ method: "POST" })
     const contactQty = Number.parseInt(
       valueOf(FIELD_KEYS.ticketQuantity) ||
       valueOf(FIELD_KEYS.ticketQuantityLegacy) ||
-      valueOf(FIELD_KEYS.ticketQuantityLegacy2),
+      valueOf(FIELD_KEYS.ticketQuantityLegacy2) ||
+      valueOf(FIELD_KEYS.ticketQuantityLegacy3),
       10,
     );
     const oppTickets = await fetchOpportunityTicketCount(data.contactId, c.email ?? "");

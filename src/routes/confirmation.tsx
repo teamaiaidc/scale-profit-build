@@ -30,14 +30,27 @@ const parseTicketQty = (value: unknown) => {
   return match ? Number(match[0]) : 1;
 };
 const clampTicketQty = (value: number) => Math.min(Math.max(Math.trunc(value), 1), 20);
+const normalizeCity = (value: unknown) => {
+  const raw = clean(value)?.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  if (!raw) return undefined;
+  if (/california|los-angeles|la|orange-county|san-diego|san-francisco/.test(raw)) return "california";
+  if (/nashville|tennessee|tn/.test(raw)) return "nashville";
+  if (/boston|massachusetts|ma/.test(raw)) return "boston";
+  return raw;
+};
 
 export const Route = createFileRoute("/confirmation")({
   validateSearch: (s: Record<string, unknown>): Search => {
     const str = (a: unknown, b: unknown) => clean(a) ?? clean(b);
+    const ticketValue =
+      s.qty ??
+      s.sp_no_of_ticket_purchased ??
+      s["contact.sp_no_of_ticket_purchased"] ??
+      s.ticket_quantity;
     return {
-      city: clean(s.city) ?? "boston",
+      city: normalizeCity(s.event_city) ?? normalizeCity(s.eventCity) ?? normalizeCity(s.city) ?? "boston",
       tier: s.tier === "vip" ? "vip" : "ga",
-      qty: clampTicketQty(parseTicketQty(s.qty)),
+      qty: clampTicketQty(parseTicketQty(ticketValue)),
       email: clean(s.email),
       // Accept camelCase or snake_case (GHL merge fields use snake_case).
       firstName: str(s.firstName, s.first_name),
@@ -73,6 +86,15 @@ function ConfirmationPage() {
   useEffect(() => {
     let active = true;
     setReady(false);
+    const urlQty =
+      typeof window === "undefined"
+        ? 1
+        : Math.max(
+            ...["qty", "sp_no_of_ticket_purchased", "contact.sp_no_of_ticket_purchased", "ticket_quantity"].map(
+              (key) => parseTicketQty(new URLSearchParams(window.location.search).get(key)),
+            ),
+          );
+    const trustedInitialQty = clampTicketQty(Math.max(initialQty, urlQty));
     if (isVip) {
       setTicketCount(1);
       setReady(true);
@@ -80,9 +102,16 @@ function ConfirmationPage() {
         active = false;
       };
     }
+    if (trustedInitialQty > 1) {
+      setTicketCount(trustedInitialQty);
+      setReady(true);
+      return () => {
+        active = false;
+      };
+    }
 
     const t = setTimeout(async () => {
-      let nextQty = initialQty;
+      let nextQty = trustedInitialQty;
       if (email) {
         for (let attempt = 0; attempt < 6; attempt += 1) {
           try {
@@ -91,7 +120,7 @@ function ConfirmationPage() {
               nextQty = result.quantity;
               break;
             }
-            if (result.found && initialQty > 1) break;
+            if (result.found && trustedInitialQty > 1) break;
           } catch (err) {
             console.warn("Ticket quantity lookup failed:", err);
           }
