@@ -21,9 +21,18 @@ import logo from "@/assets/hero-banner.webp";
 
 type Search = { city?: string; tier?: string; email?: string };
 
+const normalizeCity = (value: unknown) => {
+  if (typeof value !== "string" || !value.trim() || /{{|}}/.test(value)) return "boston";
+  const raw = value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  if (/california|los-angeles|la|orange-county|san-diego|san-francisco/.test(raw)) return "california";
+  if (/nashville|tennessee|tn/.test(raw)) return "nashville";
+  if (/boston|massachusetts|ma/.test(raw)) return "boston";
+  return raw;
+};
+
 export const Route = createFileRoute("/checkout")({
   validateSearch: (s: Record<string, unknown>): Search => ({
-    city: typeof s.city === "string" ? s.city : "boston",
+    city: normalizeCity(s.city),
     tier: typeof s.tier === "string" ? s.tier : "ga",
     email: typeof s.email === "string" ? s.email : undefined,
   }),
