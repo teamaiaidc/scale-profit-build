@@ -345,39 +345,36 @@ function readTicketNumberFromRecord(value: unknown): number {
 }
 
 function paymentLookupPaths(contactId: string, email: string): string[] {
-  const params = [
-    `locationId=${GHL_LOCATION_ID}&contactId=${encodeURIComponent(contactId)}&limit=50`,
-    `altId=${GHL_LOCATION_ID}&altType=location&contactId=${encodeURIComponent(contactId)}&limit=50`,
-  ];
-  if (email) {
-    params.push(
-      `locationId=${GHL_LOCATION_ID}&email=${encodeURIComponent(email)}&limit=50`,
-      `altId=${GHL_LOCATION_ID}&altType=location&email=${encodeURIComponent(email)}&limit=50`,
+  const paths: string[] = [];
+  if (contactId) {
+    paths.push(
+      `/payments/orders?altId=${GHL_LOCATION_ID}&altType=location&contactId=${encodeURIComponent(contactId)}&limit=20`,
     );
   }
-  return params.flatMap((query) => [
-    `/payments/orders?${query}`,
-    `/payments/transactions?${query}`,
-  ]);
+  if (email) {
+    paths.push(
+      `/payments/orders?altId=${GHL_LOCATION_ID}&altType=location&email=${encodeURIComponent(email)}&limit=20`,
+    );
+  }
+  return paths;
 }
 
 async function fetchPaymentTicketCount(contactId: string, email: string): Promise<number> {
-  let best = 0;
   for (const path of paymentLookupPaths(contactId, email)) {
     try {
       const res = await ghlFetch(path, { method: "GET" });
-      best = Math.max(best, readTicketNumberFromRecord(res));
+      const n = readTicketNumberFromRecord(res);
+      if (n > 0) return n;
     } catch (err) {
       console.warn(`GHL payment lookup skipped ${path}:`, (err as Error).message);
     }
   }
-  return best;
+  return 0;
 }
 
-// Walk a payment-orders / payment-transactions payload and find the largest
-// monetary amount on a top-level numeric field named like amount/total/price.
-// GHL returns major units for these endpoints; we normalize cents-shaped
-// numbers (> 10000) just in case the schema ever changes.
+// Walk a /payments/orders payload and find the largest monetary amount on a
+// top-level numeric field named like amount/total. GHL returns major units
+// for this endpoint; we normalize cents-shaped numbers (> 10000) just in case.
 function readPaymentAmountFromRecord(value: unknown): number {
   let best = 0;
   const seen = new Set<unknown>();
@@ -406,16 +403,36 @@ function readPaymentAmountFromRecord(value: unknown): number {
 }
 
 async function fetchPaymentAmount(contactId: string, email: string): Promise<number> {
-  let best = 0;
   for (const path of paymentLookupPaths(contactId, email)) {
     try {
       const res = await ghlFetch(path, { method: "GET" });
-      best = Math.max(best, readPaymentAmountFromRecord(res));
+      const amt = readPaymentAmountFromRecord(res);
+      if (amt > 0) return amt;
     } catch (err) {
       console.warn(`GHL payment amount lookup skipped ${path}:`, (err as Error).message);
     }
   }
-  return best;
+  return 0;
+}
+
+// Bounded-concurrency map. Worker timeouts kill the whole listSeminarPurchasers
+// call when we fan out hundreds of GHL requests in parallel via Promise.all.
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T, idx: number) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (true) {
+      const i = cursor++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i], i);
+    }
+  });
+  await Promise.all(workers);
+  return results;
 }
 
 export const lookupGhlContactByEmail = createServerFn({ method: "POST" })
