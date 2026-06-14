@@ -1022,7 +1022,8 @@ export const getPurchaserDetail = createServerFn({ method: "POST" })
     const contactQty = Number.parseInt(
       valueOf(FIELD_KEYS.ticketQuantity) ||
       valueOf(FIELD_KEYS.ticketQuantityLegacy) ||
-      valueOf(FIELD_KEYS.ticketQuantityLegacy2),
+      valueOf(FIELD_KEYS.ticketQuantityLegacy2) ||
+      valueOf(FIELD_KEYS.ticketQuantityLegacy3),
       10,
     );
     const oppTickets = await fetchOpportunityTicketCount(data.contactId, c.email ?? "");
