@@ -398,6 +398,8 @@ export const getGhlTicketQuantityByEmail = createServerFn({ method: "POST" })
         { method: "GET" },
       )) as {
         opportunities?: Array<{
+          name?: string;
+          monetaryValue?: number | string;
           customFields?: Array<{
             id?: string;
             value?: unknown;
@@ -408,20 +410,29 @@ export const getGhlTicketQuantityByEmail = createServerFn({ method: "POST" })
         }>;
       };
 
-      let best = 0;
+      let fieldQty = 0;
+      let fallbackQty = 0;
       let raw = "";
       for (const opportunity of oppRes.opportunities ?? []) {
+        fallbackQty = Math.max(
+          fallbackQty,
+          readTicketNumberFromText(opportunity.name),
+          readTicketNumberFromAmount(opportunity.monetaryValue),
+        );
         for (const field of opportunity.customFields ?? []) {
           if (ticketFieldIds.size > 0 && (!field.id || !ticketFieldIds.has(field.id))) continue;
           const value = readCustomFieldValue(field);
           const qty = readTicketNumber(value);
-          if (qty > best) {
-            best = qty;
+          if (qty > fieldQty) {
+            fieldQty = qty;
             raw = String(value ?? "");
           }
         }
       }
-      if (best > 0) return { quantity: best, raw, found: true };
+      if (fieldQty > 1 || (fieldQty === 1 && fallbackQty <= 1)) {
+        return { quantity: fieldQty, raw, found: true };
+      }
+      if (fallbackQty > 1) return { quantity: fallbackQty, raw: String(fallbackQty), found: true };
 
       const contactMeta = await getFieldMeta();
       const contactTicketKeys = new Set<string>([
@@ -437,14 +448,14 @@ export const getGhlTicketQuantityByEmail = createServerFn({ method: "POST" })
         if (contactTicketIds.size > 0 && (!field.id || !contactTicketIds.has(field.id))) continue;
         const value = readCustomFieldValue(field);
         const qty = readTicketNumber(value);
-        if (qty > best) {
-          best = qty;
+        if (qty > fieldQty) {
+          fieldQty = qty;
           raw = String(value ?? "");
         }
       }
 
-      return best > 0
-        ? { quantity: best, raw, found: true }
+      return fieldQty > 0
+        ? { quantity: fieldQty, raw, found: true }
         : { quantity: 1, raw: "", found: false };
     } catch (err) {
       console.warn("GHL ticket quantity lookup failed:", (err as Error).message);
