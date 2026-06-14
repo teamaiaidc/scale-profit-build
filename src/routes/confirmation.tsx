@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { addAttendeesToGhl } from "@/lib/ghl.functions";
+import { addAttendeesToGhl, lookupGhlContactByEmail } from "@/lib/ghl.functions";
 import logo from "@/assets/hero-banner.webp";
 
 type Search = {
@@ -19,16 +19,26 @@ type Search = {
   endDate?: string;
 };
 
+const isMergeTag = (value?: string) => !value || /{{|}}/.test(value);
+const clean = (value: unknown) =>
+  typeof value === "string" && value.trim() && !isMergeTag(value) ? value.trim() : undefined;
+const parseTicketQty = (value: unknown) => {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value !== "string") return 1;
+  const match = value.match(/\d+/);
+  return match ? Number(match[0]) : 1;
+};
+const clampTicketQty = (value: number) => Math.min(Math.max(Math.trunc(value), 1), 20);
+
 export const Route = createFileRoute("/confirmation")({
   validateSearch: (s: Record<string, unknown>): Search => {
-    const n = Number(s.qty);
     const str = (a: unknown, b: unknown) =>
-      typeof a === "string" ? a : typeof b === "string" ? b : undefined;
+      clean(a) ?? clean(b);
     return {
-      city: typeof s.city === "string" ? s.city : "boston",
+      city: clean(s.city) ?? "boston",
       tier: s.tier === "vip" ? "vip" : "ga",
-      qty: Number.isFinite(n) ? Math.min(Math.max(Math.trunc(n), 1), 20) : 1,
-      email: typeof s.email === "string" ? s.email : undefined,
+      qty: clampTicketQty(parseTicketQty(s.qty)),
+      email: clean(s.email),
       // Accept camelCase or snake_case (GHL merge fields use snake_case).
       firstName: str(s.firstName, s.first_name),
       lastName: str(s.lastName, s.last_name),
@@ -59,10 +69,38 @@ function ConfirmationPage() {
   // VIP is always 1 ticket. For GA, qty is read from URL (populated by GHL
   // merge tag {{custom_values.sp2026ticket_quantity}}).
   const [ticketCount, setTicketCount] = useState(initialQty);
+  const lookupContact = useServerFn(lookupGhlContactByEmail);
 
   useEffect(() => {
-    if (ready) setTicketCount(initialQty);
-  }, [ready, initialQty]);
+    if (!ready) return;
+    let active = true;
+    const resolveQty = async () => {
+      let nextQty = initialQty;
+      if (!isVip && email) {
+        try {
+          const { contact, fieldDefs } = await lookupContact({ data: { email } });
+          const quantityFieldIds = new Set(
+            fieldDefs
+              .filter((f) => {
+                const key = `${f.fieldKey ?? ""} ${f.name ?? ""}`.toLowerCase();
+                return key.includes("sp2026_ticket_quantity") || key.includes("ticket_quantity");
+              })
+              .map((f) => f.id),
+          );
+          const values = contact?.customFields ?? [];
+          const hit = values.find((f) => quantityFieldIds.has(f.id) && /\d+/.test(f.value));
+          if (hit) nextQty = parseTicketQty(hit.value);
+        } catch {
+          /* keep URL qty fallback */
+        }
+      }
+      if (active) setTicketCount(clampTicketQty(nextQty));
+    };
+    void resolveQty();
+    return () => {
+      active = false;
+    };
+  }, [ready, initialQty, isVip, email, lookupContact]);
 
   const addAttendees = useServerFn(addAttendeesToGhl);
 
