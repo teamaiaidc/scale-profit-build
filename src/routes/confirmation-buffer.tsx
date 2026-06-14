@@ -19,7 +19,7 @@ type Search = {
 
 const BUFFER_INITIAL_DELAY_MS = 15000;
 const BUFFER_INTERVAL_MS = 5000;
-const BUFFER_MAX_WAIT_MS = 90000;
+const BUFFER_MAX_WAIT_MS = 75000;
 
 const isMergeTag = (value?: string) => !value || /{{|}}/.test(value);
 const clean = (value: unknown) =>

@@ -33,7 +33,7 @@ const parseTicketQty = (value: unknown) => {
 const clampTicketQty = (value: number) => Math.min(Math.max(Math.trunc(value), 1), 20);
 const TICKET_LOOKUP_INITIAL_DELAY_MS = 15000;
 const TICKET_LOOKUP_INTERVAL_MS = 5000;
-const TICKET_LOOKUP_MAX_WAIT_MS = 90000;
+const TICKET_LOOKUP_MAX_WAIT_MS = 75000;
 
 const updateUrlQty = (qty: number) => {
   if (typeof window === "undefined" || qty <= 1) return;
