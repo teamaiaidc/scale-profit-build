@@ -424,7 +424,7 @@ function Index() {
             <h3 className="text-2xl font-bold">Day 1: Building the Engine</h3>
             <ul className="mt-5 divide-y divide-border rounded-lg border border-border bg-card">
               {day1.map(([t, d]) => (
-                <li key={t} className="flex gap-4 px-5 py-3">
+                <li key={t} className="flex flex-col gap-1 px-5 py-3 sm:flex-row sm:gap-4">
                   <span className="w-24 shrink-0 font-semibold text-primary">{t}</span>
                   <span className="text-sm">{d}</span>
                 </li>
