@@ -1025,31 +1025,47 @@ export const listSeminarPurchasers = createServerFn({ method: "POST" })
       console.warn("GHL purchaser search failed:", searchError);
     }
 
-    const purchasers: SeminarPurchaser[] = rawContacts.map((c) => {
-      const tags = (c.tags ?? []).map((t) => String(t));
-      // Indicative amount = the largest opportunity value on the contact.
-      const amount = (c.opportunities ?? []).reduce(
-        (m, o) => Math.max(m, Number(o.monetaryValue) || 0),
-        0,
-      );
-      return {
-        id: String(c.id ?? c.contactId ?? ""),
-        firstName: c.firstName ?? "",
-        lastName: c.lastName ?? "",
-        name: [c.firstName, c.lastName].filter(Boolean).join(" ").trim(),
-        email: c.email ?? "",
-        phone: c.phone ?? "",
-        state: c.state ?? "",
-        tags,
-        eventSlug: deriveEventSlug(tags),
-        tier: deriveTier(tags),
-        ticketQuantity: 1,
-        amount,
-        source: c.source ?? "",
-        isAttendee: tags.includes("scale-profit-attendee"),
-        dateAdded: c.dateAdded ?? "",
-      };
-    });
+    const purchasers: SeminarPurchaser[] = await Promise.all(
+      rawContacts.map(async (c) => {
+        const tags = (c.tags ?? []).map((t) => String(t));
+        const isAttendee = tags.includes("scale-profit-attendee");
+        // Indicative amount from the opportunity. This is set at survey-time
+        // with a default qty of 1, so for GA buyers it's almost always wrong.
+        const oppAmount = (c.opportunities ?? []).reduce(
+          (m, o) => Math.max(m, Number(o.monetaryValue) || 0),
+          0,
+        );
+        // For buyers, prefer the real amount from /payments/orders /
+        // /payments/transactions. Skip for attendees (they never paid).
+        const contactId = String(c.id ?? c.contactId ?? "");
+        let amount = oppAmount;
+        if (!isAttendee && contactId) {
+          try {
+            const paid = await fetchPaymentAmount(contactId, c.email ?? "");
+            if (paid > 0) amount = paid;
+          } catch (err) {
+            console.warn("GHL paid-amount lookup failed:", (err as Error).message);
+          }
+        }
+        return {
+          id: contactId,
+          firstName: c.firstName ?? "",
+          lastName: c.lastName ?? "",
+          name: [c.firstName, c.lastName].filter(Boolean).join(" ").trim(),
+          email: c.email ?? "",
+          phone: c.phone ?? "",
+          state: c.state ?? "",
+          tags,
+          eventSlug: deriveEventSlug(tags),
+          tier: deriveTier(tags),
+          ticketQuantity: 1,
+          amount,
+          source: c.source ?? "",
+          isAttendee,
+          dateAdded: c.dateAdded ?? "",
+        };
+      }),
+    );
 
     return { purchasers, error: searchError };
   });
