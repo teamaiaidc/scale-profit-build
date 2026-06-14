@@ -30,14 +30,23 @@ const parseTicketQty = (value: unknown) => {
   return match ? Number(match[0]) : 1;
 };
 const clampTicketQty = (value: number) => Math.min(Math.max(Math.trunc(value), 1), 20);
+const normalizeCity = (value: unknown) => {
+  const raw = clean(value)?.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  if (!raw) return undefined;
+  if (/california|los-angeles|la|orange-county|san-diego|san-francisco/.test(raw)) return "california";
+  if (/nashville|tennessee|tn/.test(raw)) return "nashville";
+  if (/boston|massachusetts|ma/.test(raw)) return "boston";
+  return raw;
+};
 
 export const Route = createFileRoute("/confirmation")({
   validateSearch: (s: Record<string, unknown>): Search => {
     const str = (a: unknown, b: unknown) => clean(a) ?? clean(b);
+    const ticketValue = s.sp_no_of_ticket_purchased ?? s.ticket_quantity ?? s.qty;
     return {
-      city: clean(s.city) ?? "boston",
+      city: normalizeCity(s.event_city) ?? normalizeCity(s.eventCity) ?? normalizeCity(s.city) ?? "boston",
       tier: s.tier === "vip" ? "vip" : "ga",
-      qty: clampTicketQty(parseTicketQty(s.qty)),
+      qty: clampTicketQty(parseTicketQty(ticketValue)),
       email: clean(s.email),
       // Accept camelCase or snake_case (GHL merge fields use snake_case).
       firstName: str(s.firstName, s.first_name),
