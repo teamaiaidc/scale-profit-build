@@ -58,34 +58,19 @@ function ConfirmationPage() {
   const isVip = tier === "vip";
   const initialQty = qty ?? 1;
 
-  // Wait 10s before reading qty / rendering forms — gives GHL time to populate
-  // the custom value {{custom_values.sp2026ticket_quantity}} that drives qty.
+  // Brief wait so GHL has time to fully process the order before we render
+  // attendee forms based on `qty` (driven by {{opportunity.sp2026ticket_quantity}}).
   const [ready, setReady] = useState(false);
   useEffect(() => {
     const t = setTimeout(() => setReady(true), 10000);
     return () => clearTimeout(t);
   }, []);
 
-  // VIP is always 1 ticket. For GA, qty is read from URL (populated by GHL
-  // merge tag {{custom_values.sp2026ticket_quantity}}).
-  const [ticketCount, setTicketCount] = useState(initialQty);
-  const getQtyCustomValue = useServerFn(getGhlTicketQuantityCustomValue);
+  // VIP is always 1 ticket. For GA, qty comes from the URL, populated by GHL
+  // via the merge tag {{opportunity.sp2026ticket_quantity}} on the payment
+  // form's On-Submit redirect.
+  const ticketCount = isVip ? 1 : initialQty;
 
-  useEffect(() => {
-    if (!ready || isVip) return;
-    let active = true;
-    (async () => {
-      try {
-        const { quantity } = await getQtyCustomValue();
-        if (active && quantity > 0) setTicketCount(clampTicketQty(quantity));
-      } catch {
-        /* keep URL qty fallback */
-      }
-    })();
-    return () => {
-      active = false;
-    };
-  }, [ready, isVip, getQtyCustomValue]);
 
   const addAttendees = useServerFn(addAttendeesToGhl);
 
