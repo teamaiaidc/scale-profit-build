@@ -158,7 +158,7 @@ function ConfirmationPage() {
             </p>
 
 
-            <form onSubmit={handleSubmit} className="mt-6 space-y-5">
+            <form onSubmit={handleSubmit} className="mt-6 space-y-5" suppressHydrationWarning>
               {attendees.map((a, i) => (
                 <div key={i} className="space-y-3 rounded-lg border border-border p-4">
                   <p className="text-sm font-semibold text-primary">
