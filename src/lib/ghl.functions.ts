@@ -13,10 +13,11 @@ const FIELD_KEYS = {
   eventCity: "event_city",
   ticketTier: "ticket_tier",
   orderAmount: "order_amount",
-  // Real per-buyer ticket count, set by the GHL payment form (see docs §6).
-  ticketQuantity: "sp2026_ticket_quantity",
-  // Legacy key the site previously wrote; still read when present.
-  ticketQuantityLegacy: "ticket_quantity",
+  // Real per-buyer ticket count, set by the GHL workflow (see docs §6).
+  ticketQuantity: "sp_no_of_ticket_purchased",
+  // Fallback keys read when the primary field is not yet populated.
+  ticketQuantityLegacy: "sp2026_ticket_quantity",
+  ticketQuantityLegacy2: "ticket_quantity",
   hasMoa: "do_you_have_a_moa_1",
   attendedBefore: "have_you_attended_a_scale__profit_seminar_before_1",
   shirtSize: "scale__profit_shirt_size",
