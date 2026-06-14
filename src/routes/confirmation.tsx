@@ -31,6 +31,16 @@ const parseTicketQty = (value: unknown) => {
   return match ? Number(match[0]) : 1;
 };
 const clampTicketQty = (value: number) => Math.min(Math.max(Math.trunc(value), 1), 20);
+const TICKET_LOOKUP_INITIAL_DELAY_MS = 15000;
+const TICKET_LOOKUP_INTERVAL_MS = 5000;
+const TICKET_LOOKUP_MAX_WAIT_MS = 90000;
+
+const updateUrlQty = (qty: number) => {
+  if (typeof window === "undefined" || qty <= 1) return;
+  const url = new URL(window.location.href);
+  url.searchParams.set("qty", String(qty));
+  window.history.replaceState(null, "", url);
+};
 
 
 export const Route = createFileRoute("/confirmation")({
@@ -74,9 +84,9 @@ function ConfirmationPage() {
     getTicketQtyRef.current = getTicketQty;
   }, [getTicketQty]);
 
-  // Wait 10 seconds for the GHL workflow, then read
-  // {{opportunity.sp2026ticket_quantity}} by buyer email. The URL `qty` is only
-  // a fallback because GHL can redirect before the merge tag updates.
+  // Buffer for the GHL workflow, then poll the buyer contact field
+  // {{contact.sp_no_of_ticket_purchased}} by email. The URL `qty` is only a
+  // fallback because GHL can redirect before the merge tag updates.
   useEffect(() => {
     let active = true;
     setReady(false);
@@ -107,26 +117,26 @@ function ConfirmationPage() {
     const t = setTimeout(async () => {
       let nextQty = trustedInitialQty;
       if (email) {
-        for (let attempt = 0; attempt < 6; attempt += 1) {
+        const startedAt = Date.now();
+        while (active && Date.now() - startedAt < TICKET_LOOKUP_MAX_WAIT_MS) {
           try {
             const result = await getTicketQtyRef.current({ data: { email } });
             if (result.quantity > 1) {
               nextQty = result.quantity;
+              updateUrlQty(nextQty);
               break;
             }
-            if (result.found && trustedInitialQty > 1) break;
           } catch (err) {
             console.warn("Ticket quantity lookup failed:", err);
           }
-          if (!active || attempt === 5) break;
-          await new Promise((resolve) => setTimeout(resolve, 3000));
+          await new Promise((resolve) => setTimeout(resolve, TICKET_LOOKUP_INTERVAL_MS));
         }
       }
       if (active) {
         setTicketCount(clampTicketQty(nextQty));
         setReady(true);
       }
-    }, 10000);
+    }, TICKET_LOOKUP_INITIAL_DELAY_MS);
 
     return () => {
       active = false;
@@ -235,7 +245,7 @@ function ConfirmationPage() {
             <div>
               <p className="font-semibold">Finalizing your order…</p>
               <p className="text-sm text-muted-foreground">
-                Hang tight while we confirm your ticket count. This takes about 10 seconds.
+                Hang tight while we confirm your ticket count. This can take up to 90 seconds.
               </p>
             </div>
           </Card>
