@@ -483,6 +483,9 @@ export const getGhlTicketQuantityByEmail = createServerFn({ method: "POST" })
       }
       if (fallbackQty > 1) return { quantity: fallbackQty, raw: String(fallbackQty), found: true };
 
+      const paymentQty = await fetchPaymentTicketCount(contactId, data.email);
+      if (paymentQty > 1) return { quantity: paymentQty, raw: String(paymentQty), found: true };
+
       const contactMeta = await getFieldMeta();
       const contactTicketKeys = new Set<string>([
         FIELD_KEYS.ticketQuantity,
