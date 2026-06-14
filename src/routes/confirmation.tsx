@@ -193,8 +193,9 @@ function ConfirmationPage() {
                 You're booked for General Admission.
               </p>
               <p className="mt-2 text-muted-foreground">
-                You've got full access to both days of the Scale &amp; Profit Seminar. A confirmation
-                email with event details, your workbook, and travel info is on its way.
+                You've got full access to both days of the Scale &amp; Profit Seminar. A
+                confirmation email with event details, your workbook, and travel info is on its
+                way.
               </p>
             </>
           )}
