@@ -112,6 +112,13 @@ export const submitCheckoutToGhl = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => inputSchema.parse(d))
   .handler(async ({ data }) => {
     const tierLabel = data.tier === "vip" ? "VIP" : "General Admission";
+    const ticketQuantityFields =
+      data.tier === "vip"
+        ? [
+            { key: FIELD_KEYS.ticketQuantity, field_value: String(data.quantity) },
+            { key: FIELD_KEYS.ticketQuantityLegacy, field_value: String(data.quantity) },
+          ]
+        : [];
     const tags = [
       "scale-profit-seminar",
       `scale-profit-${data.city}`,
@@ -138,8 +145,7 @@ export const submitCheckoutToGhl = createServerFn({ method: "POST" })
         customFields: [
           { key: FIELD_KEYS.eventCity, field_value: data.city },
           { key: FIELD_KEYS.ticketTier, field_value: tierLabel },
-          { key: FIELD_KEYS.ticketQuantity, field_value: String(data.quantity) },
-          { key: FIELD_KEYS.ticketQuantityLegacy, field_value: String(data.quantity) },
+          ...ticketQuantityFields,
           { key: FIELD_KEYS.orderAmount, field_value: String(data.amount) },
           ...(data.survey
             ? [
@@ -193,10 +199,16 @@ export const submitCheckoutToGhl = createServerFn({ method: "POST" })
         if (pipeline && stageId) {
           // Opportunity custom fields: ticket count + event/cohort details
           // (so emails can merge {{opportunity.sp_cohort_*}}).
-          const oppCustomFields: Array<{ key: string; field_value: string }> = [
-            { key: OPP_FIELD_KEYS.ticketsPurchased, field_value: String(data.quantity) },
-            { key: OPP_FIELD_KEYS.ticketsPurchasedLegacy, field_value: String(data.quantity) },
-          ];
+          const oppCustomFields: Array<{ key: string; field_value: string }> =
+            data.tier === "vip"
+              ? [
+                  { key: OPP_FIELD_KEYS.ticketsPurchased, field_value: String(data.quantity) },
+                  {
+                    key: OPP_FIELD_KEYS.ticketsPurchasedLegacy,
+                    field_value: String(data.quantity),
+                  },
+                ]
+              : [];
           const cohortPairs: Array<[string, string | undefined]> = [
             [OPP_FIELD_KEYS.cohortLocation, data.event?.name],
             [OPP_FIELD_KEYS.cohortDate, data.event?.date],
