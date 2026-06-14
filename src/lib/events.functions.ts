@@ -18,7 +18,7 @@ export const verifyAdminPassword = createServerFn({ method: "POST" })
     if (!expected) {
       throw new Error("ADMIN_PASSWORD is not configured on the server.");
     }
-    if (data.password !== expected) {
+    if (data.password.trim() !== expected.trim()) {
       throw new Error("Unauthorized: incorrect password.");
     }
     return { ok: true as const };
