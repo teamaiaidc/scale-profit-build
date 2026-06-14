@@ -157,8 +157,21 @@ function ConfirmationPage() {
           )}
         </div>
 
+        {/* GA: brief wait so GHL can populate {{custom_values.sp2026ticket_quantity}} */}
+        {!isVip && !ready && (
+          <Card className="mt-10 flex items-center gap-3 p-6">
+            <Loader2 className="h-6 w-6 shrink-0 animate-spin text-primary" />
+            <div>
+              <p className="font-semibold">Finalizing your order…</p>
+              <p className="text-sm text-muted-foreground">
+                Hang tight while we confirm your ticket count. This takes about 10 seconds.
+              </p>
+            </div>
+          </Card>
+        )}
+
         {/* GA: one attendee form per purchased ticket */}
-        {!isVip && !saved && (
+        {!isVip && ready && !saved && (
           <Card className="mt-10 p-6">
             <h2 className="text-xl font-bold">
               Register your {ticketCount === 1 ? "attendee" : `${ticketCount} attendees`}
