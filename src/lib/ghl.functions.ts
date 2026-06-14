@@ -294,6 +294,17 @@ function isTicketQuantityField(meta?: { name?: string; key?: string }): boolean 
   );
 }
 
+function getInlineFieldMeta(field: unknown): { name?: string; key?: string } | undefined {
+  if (!field || typeof field !== "object") return undefined;
+  const record = field as Record<string, unknown>;
+  const key = record.key ?? record.fieldKey ?? record.field_key;
+  const name = record.name ?? record.fieldName ?? record.field_name;
+  return {
+    key: typeof key === "string" ? key : undefined,
+    name: typeof name === "string" ? name : undefined,
+  };
+}
+
 function readTicketNumberFromText(value: unknown): number {
   const text = String(value ?? "");
   const ticketMatch = text.match(/(\d+)\s*tickets?\b/i);
@@ -482,8 +493,9 @@ export const getGhlTicketQuantityByEmail = createServerFn({ method: "POST" })
       let fieldQty = 0;
       let raw = "";
       for (const field of contactFields) {
-        if (contactTicketIds.size > 0 && (!field.id || !contactTicketIds.has(field.id))) continue;
-        if (contactTicketIds.size === 0) continue;
+        const isKnownTicketField = Boolean(field.id && contactTicketIds.has(field.id));
+        const isInlineTicketField = isTicketQuantityField(getInlineFieldMeta(field));
+        if (!isKnownTicketField && !isInlineTicketField) continue;
         const value = readCustomFieldValue(field);
         const qty = readTicketNumber(value);
         if (qty > fieldQty) {
