@@ -469,11 +469,6 @@ export const getGhlTicketQuantityByEmail = createServerFn({ method: "POST" })
       );
       if (!contact?.id) return { quantity: 1, raw: "", found: false };
       const contactId = contact.id;
-      console.info("GHL ticket quantity lookup contact found", {
-        email: data.email,
-        contactId,
-        searchFieldCount: contact.customFields?.length ?? 0,
-      });
 
       let contactFields = contact.customFields ?? [];
       try {
@@ -508,14 +503,7 @@ export const getGhlTicketQuantityByEmail = createServerFn({ method: "POST" })
           raw = String(value ?? "");
         }
       }
-      if (fieldQty > 1) {
-        console.info("GHL ticket quantity found on contact field", {
-          email: data.email,
-          quantity: fieldQty,
-          raw,
-        });
-        return { quantity: fieldQty, raw, found: true };
-      }
+      if (fieldQty > 1) return { quantity: fieldQty, raw, found: true };
 
       // 2. Fallback: opportunity fields (legacy path)
       const oppMeta = await getFieldMeta("opportunity");
