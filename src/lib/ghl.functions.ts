@@ -1003,20 +1003,22 @@ export const getPurchaserDetail = createServerFn({ method: "POST" })
     });
     const valueOf = (key: string) => fields.find((x) => x.key === key)?.value ?? "";
 
-    // Ticket count: prefer the opportunity field
-    // ({{opportunity.sp_no_of_ticket_purchased}}), fall back to a contact field.
-    const oppTickets = await fetchOpportunityTicketCount(data.contactId, c.email ?? "");
+    // Ticket count: prefer the contact field set by the GHL workflow
+    // ({{contact.sp_no_of_ticket_purchased}}), fall back to opportunity / legacy fields.
     const contactQty = Number.parseInt(
-      valueOf(FIELD_KEYS.ticketQuantity) || valueOf(FIELD_KEYS.ticketQuantityLegacy),
+      valueOf(FIELD_KEYS.ticketQuantity) ||
+      valueOf(FIELD_KEYS.ticketQuantityLegacy) ||
+      valueOf(FIELD_KEYS.ticketQuantityLegacy2),
       10,
     );
+    const oppTickets = await fetchOpportunityTicketCount(data.contactId, c.email ?? "");
 
     return {
       ticketQuantity:
-        oppTickets > 0
-          ? oppTickets
-          : Number.isFinite(contactQty) && contactQty > 0
-            ? contactQty
+        Number.isFinite(contactQty) && contactQty > 0
+          ? contactQty
+          : oppTickets > 0
+            ? oppTickets
             : 0,
       answers: {
         // Agency state lives in the native contact State field.
