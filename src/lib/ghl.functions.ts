@@ -835,7 +835,7 @@ async function getFieldMeta(
 
 // Reads the ticket count from a contact's opportunity custom field
 // ({{opportunity.sp_no_of_ticket_purchased}}). Returns 0 if not set.
-async function fetchOpportunityTicketCount(contactId: string): Promise<number> {
+async function fetchOpportunityTicketCount(contactId: string, email = ""): Promise<number> {
   const oppMeta = await getFieldMeta("opportunity");
   let ticketFieldId = "";
   for (const [id, m] of oppMeta) {
@@ -878,6 +878,7 @@ async function fetchOpportunityTicketCount(contactId: string): Promise<number> {
         if (Number.isFinite(n) && n > best) best = n;
       }
     }
+    if (best <= 1 && email) best = Math.max(best, await fetchPaymentTicketCount(contactId, email));
     return best;
   } catch (err) {
     console.warn("GHL opportunity fetch failed:", (err as Error).message);
@@ -989,7 +990,8 @@ export const getPurchaserDetail = createServerFn({ method: "POST" })
 
     // Ticket count: prefer the opportunity field
     // ({{opportunity.sp_no_of_ticket_purchased}}), fall back to a contact field.
-    const oppTickets = await fetchOpportunityTicketCount(data.contactId);
+    const email = fields.find((x) => x.key === "email")?.value ?? "";
+    const oppTickets = await fetchOpportunityTicketCount(data.contactId, email);
     const contactQty = Number.parseInt(
       valueOf(FIELD_KEYS.ticketQuantity) || valueOf(FIELD_KEYS.ticketQuantityLegacy),
       10,
