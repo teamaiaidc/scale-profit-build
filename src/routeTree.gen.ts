@@ -9,12 +9,18 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as ConfirmationBufferRouteImport } from './routes/confirmation-buffer'
 import { Route as ConfirmationRouteImport } from './routes/confirmation'
 import { Route as CheckoutRouteImport } from './routes/checkout'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiPublicHooksGhlRefreshRouteImport } from './routes/api/public/hooks/ghl-refresh'
 
+const ConfirmationBufferRoute = ConfirmationBufferRouteImport.update({
+  id: '/confirmation-buffer',
+  path: '/confirmation-buffer',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ConfirmationRoute = ConfirmationRouteImport.update({
   id: '/confirmation',
   path: '/confirmation',
@@ -47,6 +53,7 @@ export interface FileRoutesByFullPath {
   '/admin': typeof AdminRoute
   '/checkout': typeof CheckoutRoute
   '/confirmation': typeof ConfirmationRoute
+  '/confirmation-buffer': typeof ConfirmationBufferRoute
   '/api/public/hooks/ghl-refresh': typeof ApiPublicHooksGhlRefreshRoute
 }
 export interface FileRoutesByTo {
@@ -54,6 +61,7 @@ export interface FileRoutesByTo {
   '/admin': typeof AdminRoute
   '/checkout': typeof CheckoutRoute
   '/confirmation': typeof ConfirmationRoute
+  '/confirmation-buffer': typeof ConfirmationBufferRoute
   '/api/public/hooks/ghl-refresh': typeof ApiPublicHooksGhlRefreshRoute
 }
 export interface FileRoutesById {
@@ -62,6 +70,7 @@ export interface FileRoutesById {
   '/admin': typeof AdminRoute
   '/checkout': typeof CheckoutRoute
   '/confirmation': typeof ConfirmationRoute
+  '/confirmation-buffer': typeof ConfirmationBufferRoute
   '/api/public/hooks/ghl-refresh': typeof ApiPublicHooksGhlRefreshRoute
 }
 export interface FileRouteTypes {
@@ -71,6 +80,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/checkout'
     | '/confirmation'
+    | '/confirmation-buffer'
     | '/api/public/hooks/ghl-refresh'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -78,6 +88,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/checkout'
     | '/confirmation'
+    | '/confirmation-buffer'
     | '/api/public/hooks/ghl-refresh'
   id:
     | '__root__'
@@ -85,6 +96,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/checkout'
     | '/confirmation'
+    | '/confirmation-buffer'
     | '/api/public/hooks/ghl-refresh'
   fileRoutesById: FileRoutesById
 }
@@ -93,11 +105,19 @@ export interface RootRouteChildren {
   AdminRoute: typeof AdminRoute
   CheckoutRoute: typeof CheckoutRoute
   ConfirmationRoute: typeof ConfirmationRoute
+  ConfirmationBufferRoute: typeof ConfirmationBufferRoute
   ApiPublicHooksGhlRefreshRoute: typeof ApiPublicHooksGhlRefreshRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/confirmation-buffer': {
+      id: '/confirmation-buffer'
+      path: '/confirmation-buffer'
+      fullPath: '/confirmation-buffer'
+      preLoaderRoute: typeof ConfirmationBufferRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/confirmation': {
       id: '/confirmation'
       path: '/confirmation'
@@ -141,6 +161,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminRoute: AdminRoute,
   CheckoutRoute: CheckoutRoute,
   ConfirmationRoute: ConfirmationRoute,
+  ConfirmationBufferRoute: ConfirmationBufferRoute,
   ApiPublicHooksGhlRefreshRoute: ApiPublicHooksGhlRefreshRoute,
 }
 export const routeTree = rootRouteImport
