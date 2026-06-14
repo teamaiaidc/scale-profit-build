@@ -340,6 +340,85 @@ export const getGhlTicketQuantityCustomValue = createServerFn({ method: "GET" })
   },
 );
 
+export const getGhlTicketQuantityByEmail = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) => lookupSchema.parse(d))
+  .handler(async ({ data }) => {
+    try {
+      const contactRes = (await ghlFetch(
+        `/contacts/?locationId=${GHL_LOCATION_ID}&query=${encodeURIComponent(data.email)}`,
+        { method: "GET" },
+      )) as { contacts?: Array<{ id?: string; email?: string; customFields?: Array<{ id?: string; value?: unknown; field_value?: unknown }> }> };
+      const contact = contactRes.contacts?.find(
+        (c) => c.email?.toLowerCase() === data.email.toLowerCase(),
+      );
+      const contactId = contact?.id ?? "";
+      if (!contactId) return { quantity: 1, raw: "", found: false };
+
+      const oppMeta = await getFieldMeta("opportunity");
+      const ticketFieldIds = new Set(
+        [...oppMeta.entries()]
+          .filter(([, m]) =>
+            [OPP_FIELD_KEYS.ticketsPurchased, OPP_FIELD_KEYS.ticketsPurchasedLegacy].includes(
+              m.key as (typeof OPP_FIELD_KEYS)["ticketsPurchased"],
+            ),
+          )
+          .map(([id]) => id),
+      );
+      const oppRes = (await ghlFetch(
+        `/opportunities/search?location_id=${GHL_LOCATION_ID}&contact_id=${contactId}`,
+        { method: "GET" },
+      )) as {
+        opportunities?: Array<{
+          customFields?: Array<{
+            id?: string;
+            value?: unknown;
+            fieldValueString?: unknown;
+            fieldValue?: unknown;
+            field_value?: unknown;
+          }>;
+        }>;
+      };
+
+      let best = 0;
+      let raw = "";
+      for (const opportunity of oppRes.opportunities ?? []) {
+        for (const field of opportunity.customFields ?? []) {
+          if (ticketFieldIds.size > 0 && (!field.id || !ticketFieldIds.has(field.id))) continue;
+          const value = readCustomFieldValue(field);
+          const qty = readTicketNumber(value);
+          if (qty > best) {
+            best = qty;
+            raw = String(value ?? "");
+          }
+        }
+      }
+      if (best > 0) return { quantity: best, raw, found: true };
+
+      const contactMeta = await getFieldMeta();
+      const contactTicketIds = new Set(
+        [...contactMeta.entries()]
+          .filter(([, m]) => [FIELD_KEYS.ticketQuantity, FIELD_KEYS.ticketQuantityLegacy].includes(m.key as (typeof FIELD_KEYS)["ticketQuantity"]))
+          .map(([id]) => id),
+      );
+      for (const field of contact.customFields ?? []) {
+        if (contactTicketIds.size > 0 && (!field.id || !contactTicketIds.has(field.id))) continue;
+        const value = readCustomFieldValue(field);
+        const qty = readTicketNumber(value);
+        if (qty > best) {
+          best = qty;
+          raw = String(value ?? "");
+        }
+      }
+
+      return best > 0
+        ? { quantity: best, raw, found: true }
+        : { quantity: 1, raw: "", found: false };
+    } catch (err) {
+      console.warn("GHL ticket quantity lookup failed:", (err as Error).message);
+      return { quantity: 1, raw: "", found: false };
+    }
+  });
+
 const pushSchema = z.object({
   contactId: z.string().min(1).max(100),
   firstName: z.string().max(100).optional(),
