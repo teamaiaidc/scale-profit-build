@@ -971,6 +971,7 @@ export const getPurchaserDetail = createServerFn({ method: "POST" })
 
     const res = (await ghlFetch(`/contacts/${data.contactId}`, { method: "GET" })) as {
       contact?: {
+        email?: string;
         state?: string;
         customFields?: Array<{ id?: string; value?: unknown; field_value?: unknown }>;
       };
@@ -990,8 +991,7 @@ export const getPurchaserDetail = createServerFn({ method: "POST" })
 
     // Ticket count: prefer the opportunity field
     // ({{opportunity.sp_no_of_ticket_purchased}}), fall back to a contact field.
-    const email = fields.find((x) => x.key === "email")?.value ?? "";
-    const oppTickets = await fetchOpportunityTicketCount(data.contactId, email);
+    const oppTickets = await fetchOpportunityTicketCount(data.contactId, c.email ?? "");
     const contactQty = Number.parseInt(
       valueOf(FIELD_KEYS.ticketQuantity) || valueOf(FIELD_KEYS.ticketQuantityLegacy),
       10,
