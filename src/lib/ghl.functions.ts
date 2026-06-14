@@ -355,11 +355,13 @@ export const getGhlTicketQuantityByEmail = createServerFn({ method: "POST" })
       const contactId = contact.id;
 
       const oppMeta = await getFieldMeta("opportunity");
+      const opportunityTicketKeys = new Set<string>([
+        OPP_FIELD_KEYS.ticketsPurchased,
+        OPP_FIELD_KEYS.ticketsPurchasedLegacy,
+      ]);
       const ticketFieldIds = new Set(
         [...oppMeta.entries()]
-          .filter(([, m]) =>
-            [OPP_FIELD_KEYS.ticketsPurchased, OPP_FIELD_KEYS.ticketsPurchasedLegacy].includes(m.key),
-          )
+          .filter(([, m]) => opportunityTicketKeys.has(m.key))
           .map(([id]) => id),
       );
       const oppRes = (await ghlFetch(
@@ -393,11 +395,13 @@ export const getGhlTicketQuantityByEmail = createServerFn({ method: "POST" })
       if (best > 0) return { quantity: best, raw, found: true };
 
       const contactMeta = await getFieldMeta();
+      const contactTicketKeys = new Set<string>([
+        FIELD_KEYS.ticketQuantity,
+        FIELD_KEYS.ticketQuantityLegacy,
+      ]);
       const contactTicketIds = new Set(
         [...contactMeta.entries()]
-          .filter(([, m]) =>
-            [FIELD_KEYS.ticketQuantity, FIELD_KEYS.ticketQuantityLegacy].includes(m.key),
-          )
+          .filter(([, m]) => contactTicketKeys.has(m.key))
           .map(([id]) => id),
       );
       for (const field of contact.customFields ?? []) {
