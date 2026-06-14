@@ -281,6 +281,30 @@ function readTicketNumberFromAmount(value: unknown): number {
   return match?.qty ?? 0;
 }
 
+function readTicketNumberFromRecord(value: unknown): number {
+  let best = readTicketNumberFromText(value);
+  const seen = new Set<unknown>();
+  const scan = (node: unknown, keyHint = "") => {
+    if (node === null || node === undefined || seen.has(node)) return;
+    if (typeof node === "string" || typeof node === "number") {
+      best = Math.max(best, readTicketNumberFromText(node));
+      if (/amount|monetary|price|subtotal|total|value/i.test(keyHint)) {
+        best = Math.max(best, readTicketNumberFromAmount(node));
+      }
+      return;
+    }
+    if (typeof node !== "object") return;
+    seen.add(node);
+    if (Array.isArray(node)) {
+      for (const item of node) scan(item, keyHint);
+      return;
+    }
+    for (const [key, child] of Object.entries(node as Record<string, unknown>)) scan(child, key);
+  };
+  scan(value);
+  return best;
+}
+
 export const lookupGhlContactByEmail = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => lookupSchema.parse(d))
   .handler(async ({ data }) => {
