@@ -26,7 +26,8 @@ const FIELD_KEYS = {
 // fields — referenced as {{opportunity.<key>}}). The cohort fields carry the
 // event details so emails/messaging can merge them from the opportunity.
 const OPP_FIELD_KEYS = {
-  ticketsPurchased: "sp_no_of_ticket_purchased",
+  ticketsPurchased: "sp2026ticket_quantity",
+  ticketsPurchasedLegacy: "sp_no_of_ticket_purchased",
   cohortLocation: "sp_cohort_location",
   cohortDate: "sp_cohort_date",
   cohortVenue: "sp_cohort_venue",
@@ -186,6 +187,7 @@ export const submitCheckoutToGhl = createServerFn({ method: "POST" })
           // (so emails can merge {{opportunity.sp_cohort_*}}).
           const oppCustomFields: Array<{ key: string; field_value: string }> = [
             { key: OPP_FIELD_KEYS.ticketsPurchased, field_value: String(data.quantity) },
+            { key: OPP_FIELD_KEYS.ticketsPurchasedLegacy, field_value: String(data.quantity) },
           ];
           const cohortPairs: Array<[string, string | undefined]> = [
             [OPP_FIELD_KEYS.cohortLocation, data.event?.name],
