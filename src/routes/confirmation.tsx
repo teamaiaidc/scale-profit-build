@@ -69,42 +69,23 @@ function ConfirmationPage() {
   // VIP is always 1 ticket. For GA, qty is read from URL (populated by GHL
   // merge tag {{custom_values.sp2026ticket_quantity}}).
   const [ticketCount, setTicketCount] = useState(initialQty);
-  const lookupContact = useServerFn(lookupGhlContactByEmail);
+  const getQtyCustomValue = useServerFn(getGhlTicketQuantityCustomValue);
 
   useEffect(() => {
-    if (!ready) return;
+    if (!ready || isVip) return;
     let active = true;
-    const resolveQty = async () => {
-      let nextQty = initialQty;
-      if (!isVip && email) {
-        try {
-          const { contact, fieldDefs } = await lookupContact({ data: { email } });
-          const quantityFieldIds = new Set(
-            fieldDefs
-              .filter((f) => {
-                const key = `${f.fieldKey ?? ""} ${f.name ?? ""}`.toLowerCase();
-                return (
-                  key.includes("sp2026_ticket_quantity") ||
-                  key.includes("sp2026ticket_quantity") ||
-                  key.includes("ticket_quantity")
-                );
-              })
-              .map((f) => f.id),
-          );
-          const values = contact?.customFields ?? [];
-          const hit = values.find((f) => quantityFieldIds.has(f.id) && /\d+/.test(f.value));
-          if (hit) nextQty = parseTicketQty(hit.value);
-        } catch {
-          /* keep URL qty fallback */
-        }
+    (async () => {
+      try {
+        const { quantity } = await getQtyCustomValue();
+        if (active && quantity > 0) setTicketCount(clampTicketQty(quantity));
+      } catch {
+        /* keep URL qty fallback */
       }
-      if (active) setTicketCount(clampTicketQty(nextQty));
-    };
-    void resolveQty();
+    })();
     return () => {
       active = false;
     };
-  }, [ready, initialQty, isVip, email, lookupContact]);
+  }, [ready, isVip, getQtyCustomValue]);
 
   const addAttendees = useServerFn(addAttendeesToGhl);
 
