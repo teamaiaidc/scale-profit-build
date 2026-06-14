@@ -470,8 +470,10 @@ function Index() {
                       {e.address ? ` — ${e.address}` : ""}
                     </p>
                     <Button
-                      className="mt-6 w-full"
+                      className="mt-auto w-full"
                       onClick={() => setOpenEvent(openEvent === i ? null : i)}
+                      aria-expanded={openEvent === i}
+                      aria-controls="event-tiers-panel"
                     >
                       {openEvent === i ? "Hide Tickets" : "View Tickets"}
                     </Button>
@@ -479,15 +481,18 @@ function Index() {
                 ) : (
                   <Card
                     key={`tbd-${i}`}
-                    className="flex flex-col items-center justify-center border-dashed p-6 text-center opacity-80"
+                    className="flex flex-col border-dashed p-6 opacity-80"
                   >
                     <h3 className="text-2xl font-bold text-muted-foreground">TBD</h3>
-                    <p className="mt-2 text-sm uppercase tracking-[0.2em] text-primary">
+                    <p className="mt-1 text-sm uppercase tracking-[0.2em] text-primary">
                       Coming Soon
                     </p>
-                    <p className="mt-3 text-sm text-muted-foreground">
+                    <p className="mt-2 text-sm text-muted-foreground">
                       New city announcement on the way.
                     </p>
+                    <Button className="mt-auto w-full" variant="outline" disabled>
+                      Coming Soon
+                    </Button>
                   </Card>
                 ),
               )}
@@ -495,51 +500,80 @@ function Index() {
           );
         })()}
 
-        {openEvent !== null && events[openEvent] && (
-          <div
-            id={`event-tiers-${openEvent}`}
-            className="mt-8 grid gap-6 rounded-xl border border-border bg-background/40 p-6 md:grid-cols-2"
-          >
-            {tiers.map((tier) => (
-              <Card
-                key={tier.name}
-                className={`flex h-full flex-col p-6 ${tier.featured ? "border-primary" : ""}`}
+        <div
+          id="event-tiers-panel"
+          className={`grid transition-all duration-500 ease-out ${
+            openEvent !== null && events[openEvent]
+              ? "mt-8 grid-rows-[1fr] opacity-100"
+              : "mt-0 grid-rows-[0fr] opacity-0"
+          }`}
+        >
+          <div className="overflow-hidden">
+            {openEvent !== null && events[openEvent] && (
+              <div
+                key={events[openEvent]!.slug}
+                className="animate-fade-in rounded-xl border border-border bg-background/40 p-6"
               >
-                <h4 className="text-xl font-bold">
-                  {tier.name}{" "}
-                  <span className="text-base font-normal text-muted-foreground">
-                    — {events[openEvent]!.city}
-                  </span>
-                </h4>
-                <p className="mt-2 text-3xl font-black text-primary">{tier.price}</p>
-                {tier.note && (
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                    {tier.note}
+                <div className="mb-6 flex flex-wrap items-baseline justify-between gap-2 border-b border-border pb-4">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+                      Selected event
+                    </p>
+                    <h3 className="text-2xl font-bold">
+                      {events[openEvent]!.city}{" "}
+                      <span className="text-base font-normal text-primary">
+                        · {events[openEvent]!.date}
+                      </span>
+                    </h3>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    {events[openEvent]!.venue}
                   </p>
-                )}
-                <ul className="mt-4 flex-1 space-y-2 text-sm">
-                  {tier.perks.map((p) => (
-                    <li key={p} className="flex gap-2">
-                      <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-                      <span>{p}</span>
-                    </li>
+                </div>
+                <div className="grid gap-6 md:grid-cols-2">
+                  {tiers.map((tier) => (
+                    <Card
+                      key={tier.name}
+                      className={`flex h-full flex-col p-6 ${tier.featured ? "border-primary" : ""}`}
+                    >
+                      <h4 className="text-xl font-bold">
+                        {tier.name}{" "}
+                        <span className="text-base font-normal text-muted-foreground">
+                          — {events[openEvent]!.city}
+                        </span>
+                      </h4>
+                      <p className="mt-2 text-3xl font-black text-primary">{tier.price}</p>
+                      {tier.note && (
+                        <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                          {tier.note}
+                        </p>
+                      )}
+                      <ul className="mt-4 flex-1 space-y-2 text-sm">
+                        {tier.perks.map((p) => (
+                          <li key={p} className="flex gap-2">
+                            <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                            <span>{p}</span>
+                          </li>
+                        ))}
+                      </ul>
+                      <Button asChild className="mt-6 w-full">
+                        <Link
+                          to="/checkout"
+                          search={{
+                            city: events[openEvent]!.slug,
+                            tier: tier.featured ? "vip" : "ga",
+                          }}
+                        >
+                          Sign Up Now!
+                        </Link>
+                      </Button>
+                    </Card>
                   ))}
-                </ul>
-                <Button asChild className="mt-6 w-full">
-                  <Link
-                    to="/checkout"
-                    search={{
-                      city: events[openEvent]!.slug,
-                      tier: tier.featured ? "vip" : "ga",
-                    }}
-                  >
-                    Sign Up Now!
-                  </Link>
-                </Button>
-              </Card>
-            ))}
+                </div>
+              </div>
+            )}
           </div>
-        )}
+        </div>
       </Section>
 
       {/* Game plan */}
