@@ -84,11 +84,19 @@ function ConfirmationPage() {
     const t = setTimeout(async () => {
       let nextQty = initialQty;
       if (email) {
-        try {
-          const result = await getTicketQtyRef.current({ data: { email } });
-          if (result.found || result.quantity > 1) nextQty = result.quantity;
-        } catch (err) {
-          console.warn("Ticket quantity lookup failed:", err);
+        for (let attempt = 0; attempt < 6; attempt += 1) {
+          try {
+            const result = await getTicketQtyRef.current({ data: { email } });
+            if (result.quantity > 1) {
+              nextQty = result.quantity;
+              break;
+            }
+            if (result.found && initialQty > 1) break;
+          } catch (err) {
+            console.warn("Ticket quantity lookup failed:", err);
+          }
+          if (!active || attempt === 5) break;
+          await new Promise((resolve) => setTimeout(resolve, 3000));
         }
       }
       if (active) {

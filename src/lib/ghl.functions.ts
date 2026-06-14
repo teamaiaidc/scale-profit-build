@@ -112,6 +112,13 @@ export const submitCheckoutToGhl = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => inputSchema.parse(d))
   .handler(async ({ data }) => {
     const tierLabel = data.tier === "vip" ? "VIP" : "General Admission";
+    const ticketQuantityFields =
+      data.tier === "vip"
+        ? [
+            { key: FIELD_KEYS.ticketQuantity, field_value: String(data.quantity) },
+            { key: FIELD_KEYS.ticketQuantityLegacy, field_value: String(data.quantity) },
+          ]
+        : [];
     const tags = [
       "scale-profit-seminar",
       `scale-profit-${data.city}`,
@@ -138,8 +145,7 @@ export const submitCheckoutToGhl = createServerFn({ method: "POST" })
         customFields: [
           { key: FIELD_KEYS.eventCity, field_value: data.city },
           { key: FIELD_KEYS.ticketTier, field_value: tierLabel },
-          { key: FIELD_KEYS.ticketQuantity, field_value: String(data.quantity) },
-          { key: FIELD_KEYS.ticketQuantityLegacy, field_value: String(data.quantity) },
+          ...ticketQuantityFields,
           { key: FIELD_KEYS.orderAmount, field_value: String(data.amount) },
           ...(data.survey
             ? [
@@ -193,10 +199,16 @@ export const submitCheckoutToGhl = createServerFn({ method: "POST" })
         if (pipeline && stageId) {
           // Opportunity custom fields: ticket count + event/cohort details
           // (so emails can merge {{opportunity.sp_cohort_*}}).
-          const oppCustomFields: Array<{ key: string; field_value: string }> = [
-            { key: OPP_FIELD_KEYS.ticketsPurchased, field_value: String(data.quantity) },
-            { key: OPP_FIELD_KEYS.ticketsPurchasedLegacy, field_value: String(data.quantity) },
-          ];
+          const oppCustomFields: Array<{ key: string; field_value: string }> =
+            data.tier === "vip"
+              ? [
+                  { key: OPP_FIELD_KEYS.ticketsPurchased, field_value: String(data.quantity) },
+                  {
+                    key: OPP_FIELD_KEYS.ticketsPurchasedLegacy,
+                    field_value: String(data.quantity),
+                  },
+                ]
+              : [];
           const cohortPairs: Array<[string, string | undefined]> = [
             [OPP_FIELD_KEYS.cohortLocation, data.event?.name],
             [OPP_FIELD_KEYS.cohortDate, data.event?.date],
@@ -302,6 +314,30 @@ function readTicketNumberFromRecord(value: unknown): number {
     for (const [key, child] of Object.entries(node as Record<string, unknown>)) scan(child, key);
   };
   scan(value);
+  return best;
+}
+
+async function fetchPaymentTicketCount(contactId: string, email: string): Promise<number> {
+  const params = [
+    `locationId=${GHL_LOCATION_ID}&contactId=${encodeURIComponent(contactId)}&limit=50`,
+    `altId=${GHL_LOCATION_ID}&altType=location&contactId=${encodeURIComponent(contactId)}&limit=50`,
+    `locationId=${GHL_LOCATION_ID}&email=${encodeURIComponent(email)}&limit=50`,
+    `altId=${GHL_LOCATION_ID}&altType=location&email=${encodeURIComponent(email)}&limit=50`,
+  ];
+  const paths = params.flatMap((query) => [
+    `/payments/orders?${query}`,
+    `/payments/transactions?${query}`,
+  ]);
+
+  let best = 0;
+  for (const path of paths) {
+    try {
+      const res = await ghlFetch(path, { method: "GET" });
+      best = Math.max(best, readTicketNumberFromRecord(res));
+    } catch (err) {
+      console.warn(`GHL payment lookup skipped ${path}:`, (err as Error).message);
+    }
+  }
   return best;
 }
 
@@ -454,10 +490,11 @@ export const getGhlTicketQuantityByEmail = createServerFn({ method: "POST" })
           }
         }
       }
-      if (fieldQty > 1 || (fieldQty === 1 && fallbackQty <= 1)) {
-        return { quantity: fieldQty, raw, found: true };
-      }
+      if (fieldQty > 1) return { quantity: fieldQty, raw, found: true };
       if (fallbackQty > 1) return { quantity: fallbackQty, raw: String(fallbackQty), found: true };
+
+      const paymentQty = await fetchPaymentTicketCount(contactId, data.email);
+      if (paymentQty > 1) return { quantity: paymentQty, raw: String(paymentQty), found: true };
 
       const contactMeta = await getFieldMeta();
       const contactTicketKeys = new Set<string>([
@@ -808,7 +845,7 @@ async function getFieldMeta(
 
 // Reads the ticket count from a contact's opportunity custom field
 // ({{opportunity.sp_no_of_ticket_purchased}}). Returns 0 if not set.
-async function fetchOpportunityTicketCount(contactId: string): Promise<number> {
+async function fetchOpportunityTicketCount(contactId: string, email = ""): Promise<number> {
   const oppMeta = await getFieldMeta("opportunity");
   let ticketFieldId = "";
   for (const [id, m] of oppMeta) {
@@ -851,6 +888,7 @@ async function fetchOpportunityTicketCount(contactId: string): Promise<number> {
         if (Number.isFinite(n) && n > best) best = n;
       }
     }
+    if (best <= 1 && email) best = Math.max(best, await fetchPaymentTicketCount(contactId, email));
     return best;
   } catch (err) {
     console.warn("GHL opportunity fetch failed:", (err as Error).message);
@@ -943,6 +981,7 @@ export const getPurchaserDetail = createServerFn({ method: "POST" })
 
     const res = (await ghlFetch(`/contacts/${data.contactId}`, { method: "GET" })) as {
       contact?: {
+        email?: string;
         state?: string;
         customFields?: Array<{ id?: string; value?: unknown; field_value?: unknown }>;
       };
@@ -962,7 +1001,7 @@ export const getPurchaserDetail = createServerFn({ method: "POST" })
 
     // Ticket count: prefer the opportunity field
     // ({{opportunity.sp_no_of_ticket_purchased}}), fall back to a contact field.
-    const oppTickets = await fetchOpportunityTicketCount(data.contactId);
+    const oppTickets = await fetchOpportunityTicketCount(data.contactId, c.email ?? "");
     const contactQty = Number.parseInt(
       valueOf(FIELD_KEYS.ticketQuantity) || valueOf(FIELD_KEYS.ticketQuantityLegacy),
       10,
