@@ -103,7 +103,6 @@ function ConfirmationPage() {
     };
   }, [isVip, email, initialQty]);
 
-
   const addAttendees = useServerFn(addAttendeesToGhl);
 
   const [attendees, setAttendees] = useState<Attendee[]>(() =>
