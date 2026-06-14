@@ -145,7 +145,7 @@ function Section({
   return (
     <section
       id={id}
-      className={`px-6 py-20 md:py-28 ${tone === "light" ? "bg-card/40" : ""} ${className}`}
+      className={`scroll-mt-24 px-6 py-20 md:py-28 ${tone === "light" ? "bg-card/40" : ""} ${className}`}
     >
       <div className="mx-auto max-w-6xl">{children}</div>
     </section>
@@ -282,7 +282,7 @@ function Index() {
             <img
               src={davidImg}
               alt="David Peterson (Coach P)"
-              className="mb-5 h-48 w-48 rounded-full object-cover"
+              className="mb-5 mx-auto h-40 w-40 rounded-full object-cover sm:mx-0 sm:h-48 sm:w-48"
             />
             <h3 className="text-2xl font-bold">David Peterson (Coach P)</h3>
             <p className="mt-1 italic text-primary">Systems & Team Building Expert</p>
@@ -313,7 +313,7 @@ function Index() {
             <img
               src={alexImg}
               alt="Alex Shattuck"
-              className="mb-5 h-48 w-48 rounded-full object-cover"
+              className="mb-5 mx-auto h-40 w-40 rounded-full object-cover sm:mx-0 sm:h-48 sm:w-48"
             />
             <h3 className="text-2xl font-bold">Alex Shattuck</h3>
             <p className="mt-1 italic text-primary">Autopilot Recruiting</p>
@@ -424,7 +424,7 @@ function Index() {
             <h3 className="text-2xl font-bold">Day 1: Building the Engine</h3>
             <ul className="mt-5 divide-y divide-border rounded-lg border border-border bg-card">
               {day1.map(([t, d]) => (
-                <li key={t} className="flex gap-4 px-5 py-3">
+                <li key={t} className="flex flex-col gap-1 px-5 py-3 sm:flex-row sm:gap-4">
                   <span className="w-24 shrink-0 font-semibold text-primary">{t}</span>
                   <span className="text-sm">{d}</span>
                 </li>
@@ -435,7 +435,7 @@ function Index() {
             <h3 className="text-2xl font-bold">Day 2: Maximizing Output & Profit</h3>
             <ul className="mt-5 divide-y divide-border rounded-lg border border-border bg-card">
               {day2.map(([t, d]) => (
-                <li key={t} className="flex gap-4 px-5 py-3">
+                <li key={t} className="flex flex-col gap-1 px-5 py-3 sm:flex-row sm:gap-4">
                   <span className="w-24 shrink-0 font-semibold text-primary">{t}</span>
                   <span className="text-sm">{d}</span>
                 </li>
@@ -502,7 +502,7 @@ function Index() {
 
         <div
           id="event-tiers-panel"
-          className={`grid transition-all duration-500 ease-out ${
+          className={`grid scroll-mt-24 transition-all duration-500 ease-out ${
             openEvent !== null && events[openEvent]
               ? "mt-8 grid-rows-[1fr] opacity-100"
               : "mt-0 grid-rows-[0fr] opacity-0"
@@ -537,8 +537,8 @@ function Index() {
                       className={`flex h-full flex-col p-6 ${tier.featured ? "border-primary" : ""}`}
                     >
                       <h4 className="text-xl font-bold">
-                        {tier.name}{" "}
-                        <span className="text-base font-normal text-muted-foreground">
+                        {tier.name}
+                        <span className="mt-1 block text-sm font-normal text-muted-foreground sm:mt-0 sm:ml-1 sm:inline sm:text-base">
                           — {events[openEvent]!.city}
                         </span>
                       </h4>
