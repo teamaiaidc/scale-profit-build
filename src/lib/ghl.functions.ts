@@ -129,6 +129,7 @@ export const submitCheckoutToGhl = createServerFn({ method: "POST" })
         customFields: [
           { key: FIELD_KEYS.eventCity, field_value: data.city },
           { key: FIELD_KEYS.ticketTier, field_value: tierLabel },
+          { key: FIELD_KEYS.ticketQuantity, field_value: String(data.quantity) },
           { key: FIELD_KEYS.ticketQuantityLegacy, field_value: String(data.quantity) },
           { key: FIELD_KEYS.orderAmount, field_value: String(data.amount) },
           ...(data.survey

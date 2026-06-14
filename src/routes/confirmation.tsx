@@ -25,6 +25,7 @@ const clean = (value: unknown) =>
 const parseTicketQty = (value: unknown) => {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value !== "string") return 1;
+  if (isMergeTag(value)) return 1;
   const match = value.match(/\d+/);
   return match ? Number(match[0]) : 1;
 };
@@ -32,8 +33,7 @@ const clampTicketQty = (value: number) => Math.min(Math.max(Math.trunc(value), 1
 
 export const Route = createFileRoute("/confirmation")({
   validateSearch: (s: Record<string, unknown>): Search => {
-    const str = (a: unknown, b: unknown) =>
-      clean(a) ?? clean(b);
+    const str = (a: unknown, b: unknown) => clean(a) ?? clean(b);
     return {
       city: clean(s.city) ?? "boston",
       tier: s.tier === "vip" ? "vip" : "ga",
@@ -83,7 +83,11 @@ function ConfirmationPage() {
             fieldDefs
               .filter((f) => {
                 const key = `${f.fieldKey ?? ""} ${f.name ?? ""}`.toLowerCase();
-                return key.includes("sp2026_ticket_quantity") || key.includes("ticket_quantity");
+                return (
+                  key.includes("sp2026_ticket_quantity") ||
+                  key.includes("sp2026ticket_quantity") ||
+                  key.includes("ticket_quantity")
+                );
               })
               .map((f) => f.id),
           );
@@ -106,9 +110,9 @@ function ConfirmationPage() {
 
   const [attendees, setAttendees] = useState<Attendee[]>(() =>
     Array.from({ length: ticketCount }, (_, i) => ({
-      firstName: i === 0 ? firstName ?? "" : "",
-      lastName: i === 0 ? lastName ?? "" : "",
-      email: i === 0 ? email ?? "" : "",
+      firstName: i === 0 ? (firstName ?? "") : "",
+      lastName: i === 0 ? (lastName ?? "") : "",
+      email: i === 0 ? (email ?? "") : "",
     })),
   );
 
@@ -116,12 +120,14 @@ function ConfirmationPage() {
   useEffect(() => {
     setAttendees((prev) => {
       if (prev.length === ticketCount) return prev;
-      const next = Array.from({ length: ticketCount }, (_, i) =>
-        prev[i] ?? {
-          firstName: i === 0 ? firstName ?? "" : "",
-          lastName: i === 0 ? lastName ?? "" : "",
-          email: i === 0 ? email ?? "" : "",
-        },
+      const next = Array.from(
+        { length: ticketCount },
+        (_, i) =>
+          prev[i] ?? {
+            firstName: i === 0 ? (firstName ?? "") : "",
+            lastName: i === 0 ? (lastName ?? "") : "",
+            email: i === 0 ? (email ?? "") : "",
+          },
       );
       return next;
     });
