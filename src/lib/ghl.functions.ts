@@ -35,6 +35,14 @@ const OPP_FIELD_KEYS = {
   cohortTime: "sp_cohort_time",
 } as const;
 
+const GA_PRICE_TIERS = [
+  { qty: 1, price: 997 },
+  { qty: 2, price: 1794 },
+  { qty: 3, price: 2541 },
+  { qty: 4, price: 3088 },
+  { qty: 5, price: 3535 },
+] as const;
+
 const attendeeSchema = z.object({
   firstName: z.string().min(1).max(100),
   lastName: z.string().min(1).max(100),
@@ -256,6 +264,21 @@ function readCustomFieldValue(field: {
   field_value?: unknown;
 }): unknown {
   return field.value ?? field.fieldValueString ?? field.fieldValue ?? field.field_value ?? "";
+}
+
+function readTicketNumberFromText(value: unknown): number {
+  const text = String(value ?? "");
+  const ticketMatch = text.match(/(\d+)\s*tickets?\b/i);
+  if (ticketMatch) return readTicketNumber(ticketMatch[1]);
+  return /single\s*ticket|1\s*ticket\s*only/i.test(text) ? 1 : 0;
+}
+
+function readTicketNumberFromAmount(value: unknown): number {
+  const amount = Number(value);
+  if (!Number.isFinite(amount) || amount <= 0) return 0;
+  const normalized = amount > 10000 ? amount / 100 : amount;
+  const match = GA_PRICE_TIERS.find((tier) => Math.abs(tier.price - normalized) <= 10);
+  return match?.qty ?? 0;
 }
 
 export const lookupGhlContactByEmail = createServerFn({ method: "POST" })
