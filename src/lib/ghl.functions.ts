@@ -1042,8 +1042,10 @@ export const listSeminarPurchasers = createServerFn({ method: "POST" })
       console.warn("GHL purchaser search failed:", searchError);
     }
 
-    const purchasers: SeminarPurchaser[] = await Promise.all(
-      rawContacts.map(async (c) => {
+    const purchasers: SeminarPurchaser[] = await mapWithConcurrency(
+      rawContacts,
+      8,
+      async (c) => {
         const tags = (c.tags ?? []).map((t) => String(t));
         const isAttendee = tags.includes("scale-profit-attendee");
         // Indicative amount from the opportunity. This is set at survey-time
@@ -1052,8 +1054,8 @@ export const listSeminarPurchasers = createServerFn({ method: "POST" })
           (m, o) => Math.max(m, Number(o.monetaryValue) || 0),
           0,
         );
-        // For buyers, prefer the real amount from /payments/orders /
-        // /payments/transactions. Skip for attendees (they never paid).
+        // For buyers, prefer the real amount from /payments/orders.
+        // Skip for attendees (they never paid).
         const contactId = String(c.id ?? c.contactId ?? "");
         let amount = oppAmount;
         if (!isAttendee && contactId) {
