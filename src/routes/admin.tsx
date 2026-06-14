@@ -218,7 +218,7 @@ function AdminPage() {
   const [checking, setChecking] = useState(false);
 
   const [events, setEvents] = useState<EventRow[]>(initialEvents);
-  const [saveState, setSaveState] = useState<Record<string, SaveState>>({});
+  const [saveState, setSaveState] = useState<SaveState>("idle");
 
   const [newEvent, setNewEvent] = useState<EventRow>(EMPTY_EVENT);
   const [addState, setAddState] = useState<SaveState>("idle");
@@ -274,12 +274,12 @@ function AdminPage() {
 
   function editField(slug: string, key: keyof EventRow, value: string) {
     setEvents((prev) => prev.map((ev) => (ev.slug === slug ? { ...ev, [key]: value } : ev)));
-    setSaveState((s) => ({ ...s, [slug]: "idle" }));
+    setSaveState("idle");
   }
 
-  function save(ev: EventRow) {
+  function saveAll() {
     saveStoredEvents(events);
-    setSaveState((s) => ({ ...s, [ev.slug]: "saved" }));
+    setSaveState("saved");
   }
 
   function addEvent() {
@@ -309,7 +309,7 @@ function AdminPage() {
 
   function loadTestData() {
     persist(TEST_EVENTS.map((e) => ({ ...e })));
-    setSaveState({});
+    setSaveState("idle");
   }
 
   if (!unlocked) {
@@ -375,9 +375,17 @@ function AdminPage() {
           </TabsList>
 
           <TabsContent value="events">
-            <div className="mb-6 flex justify-end">
+            <div className="mb-6 flex items-center justify-end gap-2">
               <Button variant="outline" size="sm" onClick={loadTestData}>
                 <FlaskConical className="mr-1.5 h-4 w-4" /> Load test data
+              </Button>
+              <Button size="sm" onClick={saveAll}>
+                {saveState === "saved" ? (
+                  <Check className="mr-1.5 h-4 w-4" />
+                ) : (
+                  <Save className="mr-1.5 h-4 w-4" />
+                )}
+                {saveState === "saved" ? "Saved" : "Save changes"}
               </Button>
             </div>
 
@@ -422,36 +430,26 @@ function AdminPage() {
                 </p>
               )}
               <div className="space-y-6">
-                {upcoming.map((ev) => {
-                  const state = saveState[ev.slug] ?? "idle";
-                  return (
-                    <Card key={ev.slug} className="p-6">
-                      <h3 className="mb-4 text-xl font-bold capitalize">{ev.city || ev.slug}</h3>
-                      <EventFields
-                        value={ev}
-                        idPrefix={ev.slug}
-                        onChange={(key, v) => editField(ev.slug, key, v)}
-                      />
-                      <div className="mt-4 flex items-center justify-between gap-3">
-                        <Button onClick={() => save(ev)}>
-                          {state === "saved" ? (
-                            <Check className="mr-2 h-4 w-4" />
-                          ) : (
-                            <Save className="mr-2 h-4 w-4" />
-                          )}
-                          {state === "saved" ? "Saved" : "Save changes"}
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          onClick={() => remove(ev.slug)}
-                          className="text-destructive hover:text-destructive"
-                        >
-                          <Trash2 className="mr-1.5 h-4 w-4" /> Delete
-                        </Button>
-                      </div>
-                    </Card>
-                  );
-                })}
+                {upcoming.map((ev) => (
+                  <Card key={ev.slug} className="p-6">
+                    <div className="mb-4 flex items-center justify-between gap-3">
+                      <h3 className="text-xl font-bold capitalize">{ev.city || ev.slug}</h3>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => remove(ev.slug)}
+                        className="text-destructive hover:text-destructive"
+                      >
+                        <Trash2 className="mr-1.5 h-4 w-4" /> Delete
+                      </Button>
+                    </div>
+                    <EventFields
+                      value={ev}
+                      idPrefix={ev.slug}
+                      onChange={(key, v) => editField(ev.slug, key, v)}
+                    />
+                  </Card>
+                ))}
               </div>
             </section>
 
