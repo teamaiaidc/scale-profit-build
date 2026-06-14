@@ -173,8 +173,8 @@ function Index() {
     }
     if (openEvent === null) return;
     document
-      .getElementById(`event-tiers-${openEvent}`)
-      ?.scrollIntoView({ behavior: "smooth", block: "center" });
+      .getElementById("event-tiers-panel")
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, [openEvent]);
   // Show only upcoming events (soonest first); fall back to all if none are upcoming.
   const { upcoming } = splitEvents(allEvents, getTodayISO());
