@@ -502,7 +502,7 @@ function Index() {
 
         <div
           id="event-tiers-panel"
-          className={`grid transition-all duration-500 ease-out ${
+          className={`grid scroll-mt-24 transition-all duration-500 ease-out ${
             openEvent !== null && events[openEvent]
               ? "mt-8 grid-rows-[1fr] opacity-100"
               : "mt-0 grid-rows-[0fr] opacity-0"
