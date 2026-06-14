@@ -321,11 +321,8 @@ function CheckoutPage() {
   const submitting = false;
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // ===== GHL 2-way sync =====
-  type FieldDef = { id: string; name: string; fieldKey?: string; dataType?: string };
+  // ===== GHL contact sync (prefill name/phone from an existing contact) =====
   const [ghlContactId, setGhlContactId] = useState<string | null>(null);
-  const [fieldDefs, setFieldDefs] = useState<FieldDef[]>([]);
-  const [customValues, setCustomValues] = useState<Record<string, string>>({});
   const [syncStatus, setSyncStatus] = useState<"idle" | "syncing" | "synced" | "error">("idle");
   const [syncError, setSyncError] = useState<string | null>(null);
 
@@ -339,7 +336,6 @@ function CheckoutPage() {
       setSyncError(null);
       try {
         const res = await lookupGhl({ data: { email } });
-        setFieldDefs(res.fieldDefs ?? []);
         if (res.contact) {
           setGhlContactId(res.contact.id);
           setYourInfo((prev) => ({
@@ -348,9 +344,6 @@ function CheckoutPage() {
             lastName: prev.lastName || res.contact!.lastName || "",
             phone: prev.phone || res.contact!.phone || "",
           }));
-          const map: Record<string, string> = {};
-          for (const f of res.contact.customFields) map[f.id] = f.value;
-          setCustomValues(map);
         } else {
           setGhlContactId(null);
         }
@@ -444,17 +437,6 @@ function CheckoutPage() {
         err instanceof Error ? err.message : "Could not save your details, but you can still pay.",
       );
     });
-
-    if (ghlContactId && Object.keys(customValues).length > 0) {
-      pushGhl({
-        data: {
-          contactId: ghlContactId,
-          customFields: Object.entries(customValues).map(([id, value]) => ({ id, value })),
-        },
-      }).catch(() => {
-        /* non-blocking */
-      });
-    }
 
     setStep(3);
   };
@@ -597,9 +579,6 @@ function CheckoutPage() {
                         />
                       </div>
                     </Field>
-
-
-
 
                     <Button type="button" className="w-full" onClick={() => setStep(2)}>
                       Continue
