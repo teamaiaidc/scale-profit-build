@@ -442,6 +442,7 @@ export const getGhlTicketQuantityByEmail = createServerFn({ method: "POST" })
           fallbackQty,
           readTicketNumberFromText(opportunity.name),
           readTicketNumberFromAmount(opportunity.monetaryValue),
+          readTicketNumberFromRecord(opportunity),
         );
         for (const field of opportunity.customFields ?? []) {
           if (ticketFieldIds.size > 0 && (!field.id || !ticketFieldIds.has(field.id))) continue;
@@ -841,6 +842,7 @@ async function fetchOpportunityTicketCount(contactId: string): Promise<number> {
         best,
         readTicketNumberFromText(o.name),
         readTicketNumberFromAmount(o.monetaryValue),
+        readTicketNumberFromRecord(o),
       );
       for (const f of o.customFields ?? []) {
         if (ticketFieldId && f.id !== ticketFieldId) continue;
