@@ -344,25 +344,75 @@ function readTicketNumberFromRecord(value: unknown): number {
   return best;
 }
 
-async function fetchPaymentTicketCount(contactId: string, email: string): Promise<number> {
+function paymentLookupPaths(contactId: string, email: string): string[] {
   const params = [
     `locationId=${GHL_LOCATION_ID}&contactId=${encodeURIComponent(contactId)}&limit=50`,
     `altId=${GHL_LOCATION_ID}&altType=location&contactId=${encodeURIComponent(contactId)}&limit=50`,
-    `locationId=${GHL_LOCATION_ID}&email=${encodeURIComponent(email)}&limit=50`,
-    `altId=${GHL_LOCATION_ID}&altType=location&email=${encodeURIComponent(email)}&limit=50`,
   ];
-  const paths = params.flatMap((query) => [
+  if (email) {
+    params.push(
+      `locationId=${GHL_LOCATION_ID}&email=${encodeURIComponent(email)}&limit=50`,
+      `altId=${GHL_LOCATION_ID}&altType=location&email=${encodeURIComponent(email)}&limit=50`,
+    );
+  }
+  return params.flatMap((query) => [
     `/payments/orders?${query}`,
     `/payments/transactions?${query}`,
   ]);
+}
 
+async function fetchPaymentTicketCount(contactId: string, email: string): Promise<number> {
   let best = 0;
-  for (const path of paths) {
+  for (const path of paymentLookupPaths(contactId, email)) {
     try {
       const res = await ghlFetch(path, { method: "GET" });
       best = Math.max(best, readTicketNumberFromRecord(res));
     } catch (err) {
       console.warn(`GHL payment lookup skipped ${path}:`, (err as Error).message);
+    }
+  }
+  return best;
+}
+
+// Walk a payment-orders / payment-transactions payload and find the largest
+// monetary amount on a top-level numeric field named like amount/total/price.
+// GHL returns major units for these endpoints; we normalize cents-shaped
+// numbers (> 10000) just in case the schema ever changes.
+function readPaymentAmountFromRecord(value: unknown): number {
+  let best = 0;
+  const seen = new Set<unknown>();
+  const scan = (node: unknown, keyHint = "") => {
+    if (node === null || node === undefined || seen.has(node)) return;
+    if (typeof node === "number" || typeof node === "string") {
+      if (/^(amount|amountPaid|total|subtotal|grandTotal|amountDue)$/i.test(keyHint)) {
+        const n = Number(node);
+        if (Number.isFinite(n) && n > 0) {
+          const normalized = n > 10000 ? n / 100 : n;
+          if (normalized > best) best = normalized;
+        }
+      }
+      return;
+    }
+    if (typeof node !== "object") return;
+    seen.add(node);
+    if (Array.isArray(node)) {
+      for (const item of node) scan(item, keyHint);
+      return;
+    }
+    for (const [k, v] of Object.entries(node as Record<string, unknown>)) scan(v, k);
+  };
+  scan(value);
+  return best;
+}
+
+async function fetchPaymentAmount(contactId: string, email: string): Promise<number> {
+  let best = 0;
+  for (const path of paymentLookupPaths(contactId, email)) {
+    try {
+      const res = await ghlFetch(path, { method: "GET" });
+      best = Math.max(best, readPaymentAmountFromRecord(res));
+    } catch (err) {
+      console.warn(`GHL payment amount lookup skipped ${path}:`, (err as Error).message);
     }
   }
   return best;
