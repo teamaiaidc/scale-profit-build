@@ -48,9 +48,21 @@ function ConfirmationPage() {
   const isVip = tier === "vip";
   const initialQty = qty ?? 1;
 
-  // VIP is always 1 ticket. For GA, let the buyer confirm how many tickets
-  // they purchased (GHL doesn't always send a parseable qty payload).
+  // Wait 10s before reading qty / rendering forms — gives GHL time to populate
+  // the custom value {{custom_values.sp2026ticket_quantity}} that drives qty.
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setReady(true), 10000);
+    return () => clearTimeout(t);
+  }, []);
+
+  // VIP is always 1 ticket. For GA, qty is read from URL (populated by GHL
+  // merge tag {{custom_values.sp2026ticket_quantity}}).
   const [ticketCount, setTicketCount] = useState(initialQty);
+
+  useEffect(() => {
+    if (ready) setTicketCount(initialQty);
+  }, [ready, initialQty]);
 
   const addAttendees = useServerFn(addAttendeesToGhl);
 
