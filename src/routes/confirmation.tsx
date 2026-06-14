@@ -48,9 +48,21 @@ function ConfirmationPage() {
   const isVip = tier === "vip";
   const initialQty = qty ?? 1;
 
-  // VIP is always 1 ticket. For GA, let the buyer confirm how many tickets
-  // they purchased (GHL doesn't always send a parseable qty payload).
+  // Wait 10s before reading qty / rendering forms — gives GHL time to populate
+  // the custom value {{custom_values.sp2026ticket_quantity}} that drives qty.
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setReady(true), 10000);
+    return () => clearTimeout(t);
+  }, []);
+
+  // VIP is always 1 ticket. For GA, qty is read from URL (populated by GHL
+  // merge tag {{custom_values.sp2026ticket_quantity}}).
   const [ticketCount, setTicketCount] = useState(initialQty);
+
+  useEffect(() => {
+    if (ready) setTicketCount(initialQty);
+  }, [ready, initialQty]);
 
   const addAttendees = useServerFn(addAttendeesToGhl);
 
@@ -145,8 +157,21 @@ function ConfirmationPage() {
           )}
         </div>
 
+        {/* GA: brief wait so GHL can populate {{custom_values.sp2026ticket_quantity}} */}
+        {!isVip && !ready && (
+          <Card className="mt-10 flex items-center gap-3 p-6">
+            <Loader2 className="h-6 w-6 shrink-0 animate-spin text-primary" />
+            <div>
+              <p className="font-semibold">Finalizing your order…</p>
+              <p className="text-sm text-muted-foreground">
+                Hang tight while we confirm your ticket count. This takes about 10 seconds.
+              </p>
+            </div>
+          </Card>
+        )}
+
         {/* GA: one attendee form per purchased ticket */}
-        {!isVip && !saved && (
+        {!isVip && ready && !saved && (
           <Card className="mt-10 p-6">
             <h2 className="text-xl font-bold">
               Register your {ticketCount === 1 ? "attendee" : `${ticketCount} attendees`}
