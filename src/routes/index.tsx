@@ -537,8 +537,8 @@ function Index() {
                       className={`flex h-full flex-col p-6 ${tier.featured ? "border-primary" : ""}`}
                     >
                       <h4 className="text-xl font-bold">
-                        {tier.name}{" "}
-                        <span className="text-base font-normal text-muted-foreground">
+                        {tier.name}
+                        <span className="mt-1 block text-sm font-normal text-muted-foreground sm:mt-0 sm:ml-1 sm:inline sm:text-base">
                           — {events[openEvent]!.city}
                         </span>
                       </h4>
