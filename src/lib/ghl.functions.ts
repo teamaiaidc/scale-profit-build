@@ -143,10 +143,9 @@ export const submitCheckoutToGhl = createServerFn({ method: "POST" })
       }),
     }) as Promise<{ contact?: { id?: string }; id?: string }>;
 
-    const pipelinesPromise = ghlFetch(
-      `/opportunities/pipelines?locationId=${GHL_LOCATION_ID}`,
-      { method: "GET" },
-    ).catch((err) => {
+    const pipelinesPromise = ghlFetch(`/opportunities/pipelines?locationId=${GHL_LOCATION_ID}`, {
+      method: "GET",
+    }).catch((err) => {
       console.warn("GHL pipelines fetch failed:", (err as Error).message);
       return null;
     }) as Promise<{ pipelines?: Array<{ id: string; stages?: Array<{ id: string }> }> } | null>;

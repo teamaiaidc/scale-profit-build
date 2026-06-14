@@ -181,10 +181,10 @@ function ConfirmationPage() {
                 You're in for the VIP Experience.
               </p>
               <p className="mt-2 text-muted-foreground">
-                Beyond full access to both days, your VIP ticket includes the exclusive VIP
-                dinner with David &amp; Al, preferred seating, a curated swag bag, your VIP name
-                badge, and a 90-minute implementation call. A confirmation email with all the
-                details is on its way.
+                Beyond full access to both days, your VIP ticket includes the exclusive VIP dinner
+                with David &amp; Al, preferred seating, a curated swag bag, your VIP name badge, and
+                a 90-minute implementation call. A confirmation email with all the details is on its
+                way.
               </p>
             </>
           ) : (
@@ -193,9 +193,8 @@ function ConfirmationPage() {
                 You're booked for General Admission.
               </p>
               <p className="mt-2 text-muted-foreground">
-                You've got full access to both days of the Scale &amp; Profit Seminar. A
-                confirmation email with event details, your workbook, and travel info is on its
-                way.
+                You've got full access to both days of the Scale &amp; Profit Seminar. A confirmation
+                email with event details, your workbook, and travel info is on its way.
               </p>
             </>
           )}
@@ -225,11 +224,6 @@ function ConfirmationPage() {
                 ? "Please confirm your attendee details below."
                 : `You purchased ${ticketCount} tickets — please fill in details for each attendee.`}
             </p>
-
-
-
-
-
 
             <form onSubmit={handleSubmit} className="mt-6 space-y-5" suppressHydrationWarning>
               {attendees.map((a, i) => (
