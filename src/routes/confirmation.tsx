@@ -145,33 +145,19 @@ function ConfirmationPage() {
           )}
         </div>
 
-        {/* GA: ticket-count selector so the buyer can register every attendee */}
+        {/* GA: one attendee form per purchased ticket */}
         {!isVip && !saved && (
           <Card className="mt-10 p-6">
             <h2 className="text-xl font-bold">
               Register your {ticketCount === 1 ? "attendee" : `${ticketCount} attendees`}
             </h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              How many tickets did you purchase? Select the count below, then fill in details
-              for each attendee.
+              {ticketCount === 1
+                ? "Please confirm your attendee details below."
+                : `You purchased ${ticketCount} tickets — please fill in details for each attendee.`}
             </p>
 
-            <div className="mt-4 space-y-1.5">
-              <Label className="text-xs uppercase tracking-wide text-muted-foreground">
-                Number of tickets purchased
-              </Label>
-              <select
-                value={ticketCount}
-                onChange={(e) => setTicketCount(Math.min(Math.max(parseInt(e.target.value, 10) || 1, 1), 20))}
-                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              >
-                {Array.from({ length: 20 }, (_, i) => i + 1).map((n) => (
-                  <option key={n} value={n}>
-                    {n} {n === 1 ? "ticket" : "tickets"}
-                  </option>
-                ))}
-              </select>
-            </div>
+
 
 
 
