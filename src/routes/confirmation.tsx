@@ -238,7 +238,7 @@ function ConfirmationPage() {
           )}
         </div>
 
-        {/* GA: brief wait so GHL can populate {{custom_values.sp2026ticket_quantity}} */}
+        {/* GA: wait so GHL can populate {{contact.sp_no_of_ticket_purchased}} */}
         {!isVip && !ready && (
           <Card className="mt-10 flex items-center gap-3 p-6">
             <Loader2 className="h-6 w-6 shrink-0 animate-spin text-primary" />

@@ -88,7 +88,7 @@ The one that matters for tracking is **`event_city`** — add it as a hidden fie
 ## 6. Tracking ticket quantity (multiple tickets) + the loop page
 
 **Important:** quantity is chosen **inside the GHL payment form**, not on the site.
-The real count must be written into the **opportunity** field
+The real count must be written into the buyer **contact** field
 `sp_no_of_ticket_purchased` (`{{contact.sp_no_of_ticket_purchased}}`). If this
 field is still `1` when GHL redirects, the site now waits and polls the buyer
 contact for up to 90 seconds before showing the attendee forms.
@@ -103,9 +103,10 @@ confirmation page reads it before displaying attendee fields.
 
 **Goal:** each ticket becomes its own **attendee record** (a separate GHL contact).
 
-1. In the payment form's **On-Submit redirect**, send the buyer to the confirmation
-   page (`/confirmation`) with the count + identity, e.g.
-   `https://<site>/confirmation?qty={{contact.sp_no_of_ticket_purchased}}&city={{contact.event_city}}&tier=ga&email={{contact.email}}&first_name={{contact.first_name}}&last_name={{contact.last_name}}`
+1. In the payment form's **On-Submit redirect**, send the buyer to the buffer
+   page (`/confirmation-buffer`) with the count + identity. The buffer waits for
+   `{{contact.sp_no_of_ticket_purchased}}`, then forwards to `/confirmation`, e.g.
+   `https://<site>/confirmation-buffer?qty={{contact.sp_no_of_ticket_purchased}}&city={{contact.event_city}}&tier=ga&email={{contact.email}}&first_name={{contact.first_name}}&last_name={{contact.last_name}}`
 2. The page reads `qty` and **renders one attendee form per ticket** (it scales
    automatically). Attendee #1 is **pre-filled** with the buyer's name + email so they
    can confirm they're attending (or edit it).
