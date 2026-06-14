@@ -695,9 +695,17 @@ function PurchaserDialog({
 }) {
   const p = purchaser;
   const detailFn = useServerFn(getPurchaserDetail);
+  const addAttendeesFn = useServerFn(addAttendeesToGhl);
   const [detail, setDetail] = useState<PurchaserDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
+
+  type NewAttendee = { firstName: string; lastName: string; email: string };
+  const emptyAttendee: NewAttendee = { firstName: "", lastName: "", email: "" };
+  const [extraAttendees, setExtraAttendees] = useState<NewAttendee[]>([{ ...emptyAttendee }]);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(0);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // Fetch the contact's custom fields when a row is opened (GHL's search
   // endpoint omits them, so this needs a per-contact call).
@@ -710,6 +718,9 @@ function PurchaserDialog({
     setLoading(true);
     setDetail(null);
     setDetailError(null);
+    setExtraAttendees([{ ...emptyAttendee }]);
+    setSaved(0);
+    setSaveError(null);
     detailFn({ data: { password, contactId: p.id } })
       .then((res) => {
         if (!cancelled) setDetail(res);
@@ -738,6 +749,47 @@ function PurchaserDialog({
       ].filter((r) => r.value)
     : [];
   const ticketQty = detail && detail.ticketQuantity > 0 ? detail.ticketQuantity : null;
+
+  const setRow = (i: number, key: keyof NewAttendee, value: string) =>
+    setExtraAttendees((prev) =>
+      prev.map((a, idx) => (idx === i ? { ...a, [key]: value } : a)),
+    );
+  const addRow = () => setExtraAttendees((prev) => [...prev, { ...emptyAttendee }]);
+  const removeRow = (i: number) =>
+    setExtraAttendees((prev) => (prev.length === 1 ? prev : prev.filter((_, idx) => idx !== i)));
+
+  const handleAddAttendees = async () => {
+    if (!p) return;
+    const cleaned = extraAttendees
+      .map((a) => ({
+        firstName: a.firstName.trim(),
+        lastName: a.lastName.trim(),
+        email: a.email.trim(),
+      }))
+      .filter((a) => a.firstName && a.lastName && a.email);
+    if (cleaned.length === 0) {
+      setSaveError("Please fill in at least one attendee.");
+      return;
+    }
+    setSaveError(null);
+    setSaving(true);
+    try {
+      const res = await addAttendeesFn({
+        data: {
+          city: p.eventSlug || "boston",
+          tier: p.tier === "VIP" ? "vip" : "ga",
+          attendees: cleaned,
+        },
+      });
+      setSaved(res.saved);
+      if (res.failed > 0) setSaveError(`${res.failed} attendee(s) failed to save.`);
+      setExtraAttendees([{ ...emptyAttendee }]);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Failed to add attendees.");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <Dialog open={p !== null} onOpenChange={(open) => !open && onClose()}>
@@ -773,6 +825,79 @@ function PurchaserDialog({
                   </p>
                 </div>
               </div>
+
+              {/* Add attendees */}
+              {!p.isAttendee && (
+                <div className="rounded-lg border border-border p-4">
+                  <div className="mb-2 flex items-center justify-between">
+                    <p className="text-sm font-semibold">Add additional attendees</p>
+                    {ticketQty && ticketQty > 1 && (
+                      <p className="text-xs text-muted-foreground">
+                        {ticketQty} tickets purchased
+                      </p>
+                    )}
+                  </div>
+                  <p className="mb-3 text-xs text-muted-foreground">
+                    Register the buyer's extra ticket holders. Each attendee gets tagged into{" "}
+                    <span className="font-mono">{p.eventSlug || "boston"}</span>.
+                  </p>
+                  <div className="space-y-3">
+                    {extraAttendees.map((a, i) => (
+                      <div key={i} className="space-y-2 rounded-md border border-border/60 p-3">
+                        <div className="flex items-center justify-between">
+                          <p className="text-xs font-semibold text-primary">Attendee {i + 1}</p>
+                          {extraAttendees.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => removeRow(i)}
+                              className="text-xs text-destructive hover:underline"
+                            >
+                              Remove
+                            </button>
+                          )}
+                        </div>
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          <Input
+                            placeholder="First name"
+                            value={a.firstName}
+                            onChange={(e) => setRow(i, "firstName", e.target.value)}
+                          />
+                          <Input
+                            placeholder="Last name"
+                            value={a.lastName}
+                            onChange={(e) => setRow(i, "lastName", e.target.value)}
+                          />
+                        </div>
+                        <Input
+                          type="email"
+                          placeholder="Email"
+                          value={a.email}
+                          onChange={(e) => setRow(i, "email", e.target.value)}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <Button variant="outline" size="sm" onClick={addRow} type="button">
+                      <Plus className="mr-1.5 h-4 w-4" /> Add another
+                    </Button>
+                    <Button size="sm" onClick={handleAddAttendees} disabled={saving}>
+                      {saving ? (
+                        <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Check className="mr-1.5 h-4 w-4" />
+                      )}
+                      {saving ? "Saving…" : "Save attendees"}
+                    </Button>
+                    {saved > 0 && !saving && (
+                      <span className="text-xs text-primary">
+                        Saved {saved} attendee{saved === 1 ? "" : "s"}.
+                      </span>
+                    )}
+                  </div>
+                  {saveError && <p className="mt-2 text-xs text-destructive">{saveError}</p>}
+                </div>
+              )}
 
               {/* Tags */}
               {p.tags.length > 0 && (
