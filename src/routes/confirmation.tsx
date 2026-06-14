@@ -42,7 +42,11 @@ const normalizeCity = (value: unknown) => {
 export const Route = createFileRoute("/confirmation")({
   validateSearch: (s: Record<string, unknown>): Search => {
     const str = (a: unknown, b: unknown) => clean(a) ?? clean(b);
-    const ticketValue = s.sp_no_of_ticket_purchased ?? s.ticket_quantity ?? s.qty;
+    const ticketValue =
+      s.qty ??
+      s.sp_no_of_ticket_purchased ??
+      s["contact.sp_no_of_ticket_purchased"] ??
+      s.ticket_quantity;
     return {
       city: normalizeCity(s.event_city) ?? normalizeCity(s.eventCity) ?? normalizeCity(s.city) ?? "boston",
       tier: s.tier === "vip" ? "vip" : "ga",
