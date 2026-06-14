@@ -26,13 +26,22 @@ const FIELD_KEYS = {
 // fields — referenced as {{opportunity.<key>}}). The cohort fields carry the
 // event details so emails/messaging can merge them from the opportunity.
 const OPP_FIELD_KEYS = {
-  ticketsPurchased: "sp_no_of_ticket_purchased",
+  ticketsPurchased: "sp2026ticket_quantity",
+  ticketsPurchasedLegacy: "sp_no_of_ticket_purchased",
   cohortLocation: "sp_cohort_location",
   cohortDate: "sp_cohort_date",
   cohortVenue: "sp_cohort_venue",
   cohortAddress: "sp_cohort_address",
   cohortTime: "sp_cohort_time",
 } as const;
+
+const GA_PRICE_TIERS = [
+  { qty: 1, price: 997 },
+  { qty: 2, price: 1794 },
+  { qty: 3, price: 2541 },
+  { qty: 4, price: 3088 },
+  { qty: 5, price: 3535 },
+] as const;
 
 const attendeeSchema = z.object({
   firstName: z.string().min(1).max(100),
@@ -186,6 +195,7 @@ export const submitCheckoutToGhl = createServerFn({ method: "POST" })
           // (so emails can merge {{opportunity.sp_cohort_*}}).
           const oppCustomFields: Array<{ key: string; field_value: string }> = [
             { key: OPP_FIELD_KEYS.ticketsPurchased, field_value: String(data.quantity) },
+            { key: OPP_FIELD_KEYS.ticketsPurchasedLegacy, field_value: String(data.quantity) },
           ];
           const cohortPairs: Array<[string, string | undefined]> = [
             [OPP_FIELD_KEYS.cohortLocation, data.event?.name],
@@ -240,6 +250,60 @@ type GhlContactSnapshot = {
 };
 
 const lookupSchema = z.object({ email: z.string().email().max(200) });
+
+function readTicketNumber(value: unknown): number {
+  const match = String(value ?? "").match(/\d+/);
+  const qty = match ? Number(match[0]) : 0;
+  return Number.isFinite(qty) ? Math.min(Math.max(Math.trunc(qty), 0), 20) : 0;
+}
+
+function readCustomFieldValue(field: {
+  value?: unknown;
+  fieldValueString?: unknown;
+  fieldValue?: unknown;
+  field_value?: unknown;
+}): unknown {
+  return field.value ?? field.fieldValueString ?? field.fieldValue ?? field.field_value ?? "";
+}
+
+function readTicketNumberFromText(value: unknown): number {
+  const text = String(value ?? "");
+  const ticketMatch = text.match(/(\d+)\s*tickets?\b/i);
+  if (ticketMatch) return readTicketNumber(ticketMatch[1]);
+  return /single\s*ticket|1\s*ticket\s*only/i.test(text) ? 1 : 0;
+}
+
+function readTicketNumberFromAmount(value: unknown): number {
+  const amount = Number(value);
+  if (!Number.isFinite(amount) || amount <= 0) return 0;
+  const normalized = amount > 10000 ? amount / 100 : amount;
+  const match = GA_PRICE_TIERS.find((tier) => Math.abs(tier.price - normalized) <= 10);
+  return match?.qty ?? 0;
+}
+
+function readTicketNumberFromRecord(value: unknown): number {
+  let best = readTicketNumberFromText(value);
+  const seen = new Set<unknown>();
+  const scan = (node: unknown, keyHint = "") => {
+    if (node === null || node === undefined || seen.has(node)) return;
+    if (typeof node === "string" || typeof node === "number") {
+      best = Math.max(best, readTicketNumberFromText(node));
+      if (/amount|monetary|price|subtotal|total|value/i.test(keyHint)) {
+        best = Math.max(best, readTicketNumberFromAmount(node));
+      }
+      return;
+    }
+    if (typeof node !== "object") return;
+    seen.add(node);
+    if (Array.isArray(node)) {
+      for (const item of node) scan(item, keyHint);
+      return;
+    }
+    for (const [key, child] of Object.entries(node as Record<string, unknown>)) scan(child, key);
+  };
+  scan(value);
+  return best;
+}
 
 export const lookupGhlContactByEmail = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => lookupSchema.parse(d))
@@ -322,6 +386,107 @@ export const getGhlTicketQuantityCustomValue = createServerFn({ method: "GET" })
     }
   },
 );
+
+export const getGhlTicketQuantityByEmail = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) => lookupSchema.parse(d))
+  .handler(async ({ data }) => {
+    try {
+      const contactRes = (await ghlFetch(
+        `/contacts/?locationId=${GHL_LOCATION_ID}&query=${encodeURIComponent(data.email)}`,
+        { method: "GET" },
+      )) as {
+        contacts?: Array<{
+          id?: string;
+          email?: string;
+          customFields?: Array<{ id?: string; value?: unknown; field_value?: unknown }>;
+        }>;
+      };
+      const contact = contactRes.contacts?.find(
+        (c) => c.email?.toLowerCase() === data.email.toLowerCase(),
+      );
+      if (!contact?.id) return { quantity: 1, raw: "", found: false };
+      const contactId = contact.id;
+
+      const oppMeta = await getFieldMeta("opportunity");
+      const opportunityTicketKeys = new Set<string>([
+        OPP_FIELD_KEYS.ticketsPurchased,
+        OPP_FIELD_KEYS.ticketsPurchasedLegacy,
+      ]);
+      const ticketFieldIds = new Set(
+        [...oppMeta.entries()]
+          .filter(([, m]) => opportunityTicketKeys.has(m.key))
+          .map(([id]) => id),
+      );
+      const oppRes = (await ghlFetch(
+        `/opportunities/search?location_id=${GHL_LOCATION_ID}&contact_id=${contactId}`,
+        { method: "GET" },
+      )) as {
+        opportunities?: Array<{
+          name?: string;
+          monetaryValue?: number | string;
+          customFields?: Array<{
+            id?: string;
+            value?: unknown;
+            fieldValueString?: unknown;
+            fieldValue?: unknown;
+            field_value?: unknown;
+          }>;
+        }>;
+      };
+
+      let fieldQty = 0;
+      let fallbackQty = 0;
+      let raw = "";
+      for (const opportunity of oppRes.opportunities ?? []) {
+        fallbackQty = Math.max(
+          fallbackQty,
+          readTicketNumberFromText(opportunity.name),
+          readTicketNumberFromAmount(opportunity.monetaryValue),
+          readTicketNumberFromRecord(opportunity),
+        );
+        for (const field of opportunity.customFields ?? []) {
+          if (ticketFieldIds.size > 0 && (!field.id || !ticketFieldIds.has(field.id))) continue;
+          const value = readCustomFieldValue(field);
+          const qty = readTicketNumber(value);
+          if (qty > fieldQty) {
+            fieldQty = qty;
+            raw = String(value ?? "");
+          }
+        }
+      }
+      if (fieldQty > 1 || (fieldQty === 1 && fallbackQty <= 1)) {
+        return { quantity: fieldQty, raw, found: true };
+      }
+      if (fallbackQty > 1) return { quantity: fallbackQty, raw: String(fallbackQty), found: true };
+
+      const contactMeta = await getFieldMeta();
+      const contactTicketKeys = new Set<string>([
+        FIELD_KEYS.ticketQuantity,
+        FIELD_KEYS.ticketQuantityLegacy,
+      ]);
+      const contactTicketIds = new Set(
+        [...contactMeta.entries()]
+          .filter(([, m]) => contactTicketKeys.has(m.key))
+          .map(([id]) => id),
+      );
+      for (const field of contact.customFields ?? []) {
+        if (contactTicketIds.size > 0 && (!field.id || !contactTicketIds.has(field.id))) continue;
+        const value = readCustomFieldValue(field);
+        const qty = readTicketNumber(value);
+        if (qty > fieldQty) {
+          fieldQty = qty;
+          raw = String(value ?? "");
+        }
+      }
+
+      return fieldQty > 0
+        ? { quantity: fieldQty, raw, found: true }
+        : { quantity: 1, raw: "", found: false };
+    } catch (err) {
+      console.warn("GHL ticket quantity lookup failed:", (err as Error).message);
+      return { quantity: 1, raw: "", found: false };
+    }
+  });
 
 const pushSchema = z.object({
   contactId: z.string().min(1).max(100),
@@ -586,9 +751,9 @@ type RawSearchContact = {
   opportunities?: Array<{ monetaryValue?: number }>;
 };
 
-// GHL field keys come back as `contact.<key>`; we compare against the bare key.
+// GHL field keys come back as `contact.<key>` / `opportunity.<key>`; compare bare keys.
 function bareFieldKey(key: string): string {
-  return key.replace(/^contact\./, "");
+  return key.replace(/^(contact|opportunity)\./, "");
 }
 
 // Work out which event a contact belongs to. Buyers carry a `scale-profit-{slug}`
@@ -647,7 +812,10 @@ async function fetchOpportunityTicketCount(contactId: string): Promise<number> {
   const oppMeta = await getFieldMeta("opportunity");
   let ticketFieldId = "";
   for (const [id, m] of oppMeta) {
-    if (m.key === OPP_FIELD_KEYS.ticketsPurchased) {
+    if (
+      m.key === OPP_FIELD_KEYS.ticketsPurchased ||
+      m.key === OPP_FIELD_KEYS.ticketsPurchasedLegacy
+    ) {
       ticketFieldId = id;
       break;
     }
@@ -658,6 +826,8 @@ async function fetchOpportunityTicketCount(contactId: string): Promise<number> {
       { method: "GET" },
     )) as {
       opportunities?: Array<{
+        name?: string;
+        monetaryValue?: number | string;
         customFields?: Array<{
           id?: string;
           fieldValueString?: string;
@@ -668,10 +838,16 @@ async function fetchOpportunityTicketCount(contactId: string): Promise<number> {
     };
     let best = 0;
     for (const o of res.opportunities ?? []) {
+      best = Math.max(
+        best,
+        readTicketNumberFromText(o.name),
+        readTicketNumberFromAmount(o.monetaryValue),
+        readTicketNumberFromRecord(o),
+      );
       for (const f of o.customFields ?? []) {
         if (ticketFieldId && f.id !== ticketFieldId) continue;
-        const raw = f.fieldValueString ?? f.fieldValue ?? f.field_value ?? "";
-        const n = Number.parseInt(String(raw), 10);
+        const raw = readCustomFieldValue(f);
+        const n = readTicketNumber(raw);
         if (Number.isFinite(n) && n > best) best = n;
       }
     }

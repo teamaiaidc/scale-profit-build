@@ -1,12 +1,12 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CheckCircle2, Loader2, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { addAttendeesToGhl } from "@/lib/ghl.functions";
+import { addAttendeesToGhl, getGhlTicketQuantityByEmail } from "@/lib/ghl.functions";
 import logo from "@/assets/hero-banner.webp";
 
 type Search = {
@@ -58,19 +58,50 @@ function ConfirmationPage() {
   const isVip = tier === "vip";
   const initialQty = qty ?? 1;
 
-  // Brief wait so GHL has time to fully process the order before we render
-  // attendee forms based on `qty` (driven by {{opportunity.sp2026ticket_quantity}}).
   const [ready, setReady] = useState(false);
+  const [ticketCount, setTicketCount] = useState(() => (isVip ? 1 : initialQty));
+  const getTicketQty = useServerFn(getGhlTicketQuantityByEmail);
+  const getTicketQtyRef = useRef(getTicketQty);
+
   useEffect(() => {
-    const t = setTimeout(() => setReady(true), 10000);
-    return () => clearTimeout(t);
-  }, []);
+    getTicketQtyRef.current = getTicketQty;
+  }, [getTicketQty]);
 
-  // VIP is always 1 ticket. For GA, qty comes from the URL, populated by GHL
-  // via the merge tag {{opportunity.sp2026ticket_quantity}} on the payment
-  // form's On-Submit redirect.
-  const ticketCount = isVip ? 1 : initialQty;
+  // Wait 10 seconds for the GHL workflow, then read
+  // {{opportunity.sp2026ticket_quantity}} by buyer email. The URL `qty` is only
+  // a fallback because GHL can redirect before the merge tag updates.
+  useEffect(() => {
+    let active = true;
+    setReady(false);
+    if (isVip) {
+      setTicketCount(1);
+      setReady(true);
+      return () => {
+        active = false;
+      };
+    }
 
+    const t = setTimeout(async () => {
+      let nextQty = initialQty;
+      if (email) {
+        try {
+          const result = await getTicketQtyRef.current({ data: { email } });
+          if (result.found || result.quantity > 1) nextQty = result.quantity;
+        } catch (err) {
+          console.warn("Ticket quantity lookup failed:", err);
+        }
+      }
+      if (active) {
+        setTicketCount(clampTicketQty(nextQty));
+        setReady(true);
+      }
+    }, 10000);
+
+    return () => {
+      active = false;
+      clearTimeout(t);
+    };
+  }, [isVip, email, initialQty]);
 
   const addAttendees = useServerFn(addAttendeesToGhl);
 
