@@ -845,15 +845,19 @@ function PurchaserDialog({
               </div>
 
               {/* Order summary */}
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-3 gap-3">
                 <div className="rounded-lg border border-border p-3">
                   <p className="text-xs text-muted-foreground">Tickets purchased</p>
                   <p className="text-xl font-bold">{loading ? "…" : (ticketQty ?? "—")}</p>
                 </div>
                 <div className="rounded-lg border border-border p-3">
-                  <p className="text-xs text-muted-foreground">Amount</p>
-                  <p className="text-xl font-bold">
-                    {p.amount > 0 ? `$${p.amount.toLocaleString()}` : "—"}
+                  <p className="text-xs text-muted-foreground">Buyer</p>
+                  <p className="text-xl font-bold">1</p>
+                </div>
+                <div className="rounded-lg border border-primary/40 bg-primary/5 p-3">
+                  <p className="text-xs text-muted-foreground">Still to add</p>
+                  <p className="text-xl font-bold text-primary">
+                    {loading ? "…" : additionalNeeded}
                   </p>
                 </div>
               </div>
@@ -865,7 +869,7 @@ function PurchaserDialog({
                     <p className="text-sm font-semibold">Add additional attendees</p>
                     {ticketQty && ticketQty > 1 && (
                       <p className="text-xs text-muted-foreground">
-                        {ticketQty} tickets purchased
+                        {additionalNeeded} more attendee{additionalNeeded === 1 ? "" : "s"} needed
                       </p>
                     )}
                   </div>
