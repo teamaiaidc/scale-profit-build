@@ -1005,7 +1005,7 @@ async function fetchOpportunityTicketCount(contactId: string, email = ""): Promi
 function assertAdmin(password: string) {
   const expected = process.env.ADMIN_PASSWORD;
   if (!expected) throw new Error("ADMIN_PASSWORD is not configured on the server.");
-  if (password !== expected) throw new Error("Unauthorized: incorrect password.");
+  if (password.trim() !== expected.trim()) throw new Error("Unauthorized: incorrect password.");
 }
 
 const purchasersInputSchema = z.object({ password: z.string().min(1).max(200) });
