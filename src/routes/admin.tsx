@@ -653,15 +653,14 @@ function PurchasesView({
                     <TableHead>Tier</TableHead>
                     <TableHead>Type</TableHead>
                     <TableHead className="text-center">Tickets</TableHead>
-                    <TableHead className="text-center">Filled / Remaining</TableHead>
+                    <TableHead className="text-center">Purchased / To Add</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {group.rows.map((p) => {
                     const qty = p.ticketQuantity || 0;
-                    // Buyer always counts as 1 filled seat (themselves).
-                    const filled = !p.isAttendee && qty > 0 ? 1 : 0;
-                    const remaining = qty > 0 ? Math.max(qty - filled, 0) : 0;
+                    // Buyer = 1 seat, remaining = total - buyer.
+                    const remaining = !p.isAttendee && qty > 0 ? Math.max(qty - 1, 0) : 0;
                     return (
                       <TableRow
                         key={p.id || p.email}
@@ -691,7 +690,7 @@ function PurchasesView({
                             "—"
                           ) : (
                             <span>
-                              <span className="font-medium">{filled}</span>
+                              <span className="font-medium">{qty}</span>
                               <span className="text-muted-foreground"> / </span>
                               <span
                                 className={
