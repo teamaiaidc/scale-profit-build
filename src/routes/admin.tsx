@@ -653,7 +653,7 @@ function PurchasesView({
                     <TableHead>Tier</TableHead>
                     <TableHead>Type</TableHead>
                     <TableHead className="text-center">Tickets</TableHead>
-                    <TableHead className="text-center">Filled / Remaining</TableHead>
+                    <TableHead className="text-center">Purchased / To Add</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
