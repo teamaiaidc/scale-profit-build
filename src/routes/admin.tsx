@@ -261,8 +261,9 @@ function AdminPage() {
     try {
       await verifyFn({ data: { password } });
       setUnlocked(true);
-    } catch {
-      setAuthError("Incorrect password.");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "";
+      setAuthError(message.includes("configured") ? message : "Incorrect password.");
     } finally {
       setChecking(false);
     }
