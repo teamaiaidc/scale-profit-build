@@ -652,32 +652,62 @@ function PurchasesView({
                     <TableHead>Phone</TableHead>
                     <TableHead>Tier</TableHead>
                     <TableHead>Type</TableHead>
+                    <TableHead className="text-center">Tickets</TableHead>
+                    <TableHead className="text-center">Filled / Remaining</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {group.rows.map((p) => (
-                    <TableRow
-                      key={p.id || p.email}
-                      className="cursor-pointer"
-                      onClick={() => setSelected(p)}
-                    >
-                      <TableCell className="font-medium">{p.name || "—"}</TableCell>
-                      <TableCell className="text-muted-foreground">{p.email || "—"}</TableCell>
-                      <TableCell className="text-muted-foreground">{p.phone || "—"}</TableCell>
-                      <TableCell>{p.tier || "—"}</TableCell>
-                      <TableCell>
-                        {p.isAttendee ? (
-                          <Badge variant="outline" className="text-[10px]">
-                            attendee
-                          </Badge>
-                        ) : (
-                          <Badge variant="secondary" className="text-[10px]">
-                            buyer
-                          </Badge>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {group.rows.map((p) => {
+                    const qty = p.ticketQuantity || 0;
+                    // Buyer always counts as 1 filled seat (themselves).
+                    const filled = !p.isAttendee && qty > 0 ? 1 : 0;
+                    const remaining = qty > 0 ? Math.max(qty - filled, 0) : 0;
+                    return (
+                      <TableRow
+                        key={p.id || p.email}
+                        className="cursor-pointer"
+                        onClick={() => setSelected(p)}
+                      >
+                        <TableCell className="font-medium">{p.name || "—"}</TableCell>
+                        <TableCell className="text-muted-foreground">{p.email || "—"}</TableCell>
+                        <TableCell className="text-muted-foreground">{p.phone || "—"}</TableCell>
+                        <TableCell>{p.tier || "—"}</TableCell>
+                        <TableCell>
+                          {p.isAttendee ? (
+                            <Badge variant="outline" className="text-[10px]">
+                              attendee
+                            </Badge>
+                          ) : (
+                            <Badge variant="secondary" className="text-[10px]">
+                              buyer
+                            </Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-center font-medium">
+                          {p.isAttendee ? "—" : qty > 0 ? qty : "—"}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          {p.isAttendee || qty === 0 ? (
+                            "—"
+                          ) : (
+                            <span>
+                              <span className="font-medium">{filled}</span>
+                              <span className="text-muted-foreground"> / </span>
+                              <span
+                                className={
+                                  remaining > 0
+                                    ? "font-semibold text-primary"
+                                    : "text-muted-foreground"
+                                }
+                              >
+                                {remaining}
+                              </span>
+                            </span>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </Card>
