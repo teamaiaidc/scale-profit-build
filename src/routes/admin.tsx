@@ -560,32 +560,57 @@ function PurchasesView({
   password: string;
 }) {
   const [selected, setSelected] = useState<SeminarPurchaser | null>(null);
-  const groups = purchasers ? groupByEvent(purchasers, events) : [];
+  const [search, setSearch] = useState("");
+
+  const q = search.trim().toLowerCase();
+  const filtered = (purchasers ?? []).filter((p) => {
+    if (!q) return true;
+    return (
+      p.name.toLowerCase().includes(q) ||
+      p.email.toLowerCase().includes(q) ||
+      (p.phone || "").toLowerCase().includes(q)
+    );
+  });
+  const groups = purchasers ? groupByEvent(filtered, events) : [];
   const totalPeople = purchasers?.length ?? 0;
-  const totalRevenue = groups.reduce((n, g) => n + g.revenue, 0);
+  const totalBuyers = (purchasers ?? []).filter((p) => !p.isAttendee).length;
+  const totalAttendees = (purchasers ?? []).filter((p) => p.isAttendee).length;
 
   return (
     <div>
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
         <div className="flex flex-wrap gap-3">
           <Stat icon={<Users className="h-4 w-4" />} label="People" value={String(totalPeople)} />
+          <Stat
+            icon={<Ticket className="h-4 w-4" />}
+            label="Buyers"
+            value={String(totalBuyers)}
+          />
+          <Stat
+            icon={<Users className="h-4 w-4" />}
+            label="Attendees added"
+            value={String(totalAttendees)}
+          />
           <Stat
             icon={<CalendarDays className="h-4 w-4" />}
             label="Events"
             value={String(groups.length)}
           />
-          {totalRevenue > 0 && (
-            <Stat
-              icon={<Ticket className="h-4 w-4" />}
-              label="Indicative revenue"
-              value={`$${totalRevenue.toLocaleString()}`}
-            />
-          )}
         </div>
         <Button variant="outline" size="sm" onClick={onRefresh} disabled={loading}>
           <RefreshCw className={`mr-1.5 h-4 w-4 ${loading ? "animate-spin" : ""}`} />
           {loading ? "Loading…" : "Refresh"}
         </Button>
+      </div>
+
+      <div className="mb-6">
+        <Input
+          type="search"
+          placeholder="Search purchaser by name, email, or phone…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="max-w-md"
+        />
       </div>
 
       {error && (
@@ -602,18 +627,20 @@ function PurchasesView({
 
       {!loading && purchasers !== null && groups.length === 0 && (
         <p className="rounded-lg border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
-          No purchasers found yet. Once people buy tickets they’ll appear here, grouped by event.
+          {q
+            ? `No purchasers match “${search}”.`
+            : "No purchasers found yet. Once people buy tickets they'll appear here, grouped by event."}
         </p>
       )}
 
       <div className="space-y-8">
         {groups.map((group) => (
           <section key={group.slug}>
-            <div className="mb-3 flex items-baseline justify-between gap-4">
+            <div className="mb-3 flex flex-wrap items-baseline justify-between gap-4">
               <h2 className="text-lg font-bold capitalize">{group.name}</h2>
               <p className="text-sm text-muted-foreground">
-                {group.rows.length} {group.rows.length === 1 ? "person" : "people"}
-                {group.revenue > 0 && <> · ${group.revenue.toLocaleString()}</>}
+                {group.buyers.length} {group.buyers.length === 1 ? "buyer" : "buyers"} ·{" "}
+                {group.attendees.length} attendee{group.attendees.length === 1 ? "" : "s"} added
               </p>
             </div>
             <Card className="overflow-hidden">
@@ -622,9 +649,9 @@ function PurchasesView({
                   <TableRow>
                     <TableHead>Name</TableHead>
                     <TableHead>Email</TableHead>
+                    <TableHead>Phone</TableHead>
                     <TableHead>Tier</TableHead>
-                    <TableHead className="text-right">Amount</TableHead>
-                    <TableHead>Tags</TableHead>
+                    <TableHead>Type</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -634,32 +661,20 @@ function PurchasesView({
                       className="cursor-pointer"
                       onClick={() => setSelected(p)}
                     >
-                      <TableCell className="font-medium">
-                        {p.name || "—"}
-                        {p.isAttendee && (
-                          <Badge variant="secondary" className="ml-2 align-middle text-[10px]">
+                      <TableCell className="font-medium">{p.name || "—"}</TableCell>
+                      <TableCell className="text-muted-foreground">{p.email || "—"}</TableCell>
+                      <TableCell className="text-muted-foreground">{p.phone || "—"}</TableCell>
+                      <TableCell>{p.tier || "—"}</TableCell>
+                      <TableCell>
+                        {p.isAttendee ? (
+                          <Badge variant="outline" className="text-[10px]">
                             attendee
                           </Badge>
+                        ) : (
+                          <Badge variant="secondary" className="text-[10px]">
+                            buyer
+                          </Badge>
                         )}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">{p.email || "—"}</TableCell>
-                      <TableCell>{p.tier || "—"}</TableCell>
-                      <TableCell className="text-right">
-                        {p.amount > 0 ? `$${p.amount.toLocaleString()}` : "—"}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex max-w-[260px] flex-wrap gap-1">
-                          {p.tags.slice(0, 3).map((t) => (
-                            <Badge key={t} variant="outline" className="text-[10px]">
-                              {t}
-                            </Badge>
-                          ))}
-                          {p.tags.length > 3 && (
-                            <Badge variant="outline" className="text-[10px]">
-                              +{p.tags.length - 3}
-                            </Badge>
-                          )}
-                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
