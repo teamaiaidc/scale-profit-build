@@ -507,7 +507,8 @@ type EventGroup = {
   slug: string;
   name: string;
   rows: SeminarPurchaser[];
-  revenue: number;
+  buyers: SeminarPurchaser[];
+  attendees: SeminarPurchaser[];
 };
 
 function groupByEvent(purchasers: SeminarPurchaser[], events: EventRow[]): EventGroup[] {
@@ -537,7 +538,8 @@ function groupByEvent(purchasers: SeminarPurchaser[], events: EventRow[]): Event
           nameBySlug.get(slug) ??
           (slug === "unknown" ? "Unassigned" : slug.replace(/\b\w/g, (c) => c.toUpperCase())),
         rows,
-        revenue: rows.reduce((n, r) => n + r.amount, 0),
+        buyers: rows.filter((r) => !r.isAttendee),
+        attendees: rows.filter((r) => r.isAttendee),
       };
     });
 }
