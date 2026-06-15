@@ -767,6 +767,20 @@ function PurchaserDialog({
       ].filter((r) => r.value)
     : [];
   const ticketQty = detail && detail.ticketQuantity > 0 ? detail.ticketQuantity : null;
+  // Buyer counts as ticket 1 — additional attendees the admin needs to register.
+  const additionalNeeded = ticketQty && ticketQty > 1 ? ticketQty - 1 : 0;
+
+  // Auto-size attendee rows to match how many more guests need to be added.
+  useEffect(() => {
+    if (!p || p.isAttendee || additionalNeeded <= 0) return;
+    setExtraAttendees((prev) => {
+      if (prev.length >= additionalNeeded) return prev;
+      const next = [...prev];
+      while (next.length < additionalNeeded) next.push({ ...emptyAttendee });
+      return next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [additionalNeeded, p?.id]);
 
   const setRow = (i: number, key: keyof NewAttendee, value: string) =>
     setExtraAttendees((prev) =>
