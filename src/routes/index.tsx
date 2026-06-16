@@ -140,13 +140,15 @@ function Section({
   children: React.ReactNode;
   className?: string;
   id?: string;
-  tone?: "dark" | "light";
+  tone?: "dark" | "light" | "faded";
 }) {
+  // "faded" = a true light/white section like the live site: the .section-light
+  // class locally overrides the theme tokens so the background, text, cards and
+  // borders all flip to a light palette (see styles.css).
+  const toneClass =
+    tone === "faded" ? "section-light" : tone === "light" ? "bg-card/40" : "";
   return (
-    <section
-      id={id}
-      className={`scroll-mt-24 px-6 py-20 md:py-28 ${tone === "light" ? "bg-card/40" : ""} ${className}`}
-    >
+    <section id={id} className={`scroll-mt-24 px-6 py-20 md:py-28 ${toneClass} ${className}`}>
       <div className="mx-auto max-w-6xl">{children}</div>
     </section>
   );
@@ -244,7 +246,7 @@ function Index() {
       </Section>
 
       {/* Pain points */}
-      <Section>
+      <Section tone="faded">
         <h2 className="text-center text-3xl font-bold md:text-5xl">
           Does This Sound Familiar? <span className="text-primary">You're Not Alone.</span>
         </h2>
@@ -267,7 +269,7 @@ function Index() {
       </Section>
 
       {/* Coaches */}
-      <Section tone="light">
+      <Section tone="faded">
         <h2 className="text-center text-3xl font-bold md:text-5xl">
           Your Coaches: From the Trenches to the Top
         </h2>
@@ -376,7 +378,7 @@ function Index() {
       </Section>
 
       {/* Toolkit */}
-      <Section tone="light">
+      <Section tone="faded">
         <h2 className="text-center text-3xl font-bold md:text-5xl">
           What You'll Walk Away With — The CEO Toolkit
         </h2>
@@ -392,7 +394,7 @@ function Index() {
       </Section>
 
       {/* Event details + agenda */}
-      <Section>
+      <Section tone="faded">
         <h2 className="text-center text-3xl font-bold md:text-5xl">Event Details</h2>
         <div className="mt-6 grid gap-4 md:grid-cols-4">
           <Card className="p-5">
@@ -446,7 +448,7 @@ function Index() {
       </Section>
 
       {/* Events / tickets */}
-      <Section id="offers" tone="light">
+      <Section id="offers" tone="faded">
         <h2 className="text-center text-3xl font-bold md:text-5xl">
           Choose Your Scale & Profit Experience
         </h2>
@@ -577,7 +579,7 @@ function Index() {
       </Section>
 
       {/* Game plan */}
-      <Section>
+      <Section tone="faded">
         <h2 className="text-center text-3xl font-bold md:text-5xl">
           The Scale & Profit Game Plan
         </h2>
@@ -612,7 +614,7 @@ function Index() {
       </Section>
 
       {/* Sponsors */}
-      <Section tone="light">
+      <Section tone="faded">
         <h2 className="text-center text-3xl font-bold md:text-5xl">
           Thank You For Being a Scale & Profit Sponsor
         </h2>
@@ -626,7 +628,7 @@ function Index() {
       </Section>
 
       {/* Closing CTA */}
-      <Section>
+      <Section tone="faded">
         <div className="mx-auto max-w-3xl text-center">
           <h2 className="text-3xl font-bold md:text-5xl">
             You Deserve a Business That Works for You
