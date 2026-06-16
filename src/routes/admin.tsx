@@ -503,6 +503,14 @@ function AdminPage() {
 
 // ===== Attendees / purchases tab =====
 
+// GHL dateAdded (ISO) → "Jun 15, 2026, 8:19 PM". Empty/invalid → "—".
+function formatPurchaseDate(iso: string): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+}
+
 type EventGroup = {
   slug: string;
   name: string;
@@ -654,6 +662,7 @@ function PurchasesView({
                     <TableHead>Type</TableHead>
                     <TableHead className="text-center">Tickets Purchased</TableHead>
                     <TableHead className="text-center">To Add Remaining</TableHead>
+                    <TableHead>Purchased On</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -699,6 +708,9 @@ function PurchasesView({
                               {remaining}
                             </span>
                           )}
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap text-muted-foreground">
+                          {formatPurchaseDate(p.dateAdded)}
                         </TableCell>
                       </TableRow>
                     );

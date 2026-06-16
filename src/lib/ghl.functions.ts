@@ -135,13 +135,14 @@ export const submitCheckoutToGhl = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => inputSchema.parse(d))
   .handler(async ({ data }) => {
     const tierLabel = data.tier === "vip" ? "VIP" : "General Admission";
-    const ticketQuantityFields =
-      data.tier === "vip"
-        ? [
-            { key: FIELD_KEYS.ticketQuantity, field_value: String(data.quantity) },
-            { key: FIELD_KEYS.ticketQuantityLegacy, field_value: String(data.quantity) },
-          ]
-        : [];
+    // Write the ticket count for every tier (not just VIP) so the contact's
+    // sp_no_of_ticket_purchased field is the authoritative source the admin
+    // dashboard + detail dialog read back. GA multi-ticket orders previously
+    // had no count stored anywhere reliable.
+    const ticketQuantityFields = [
+      { key: FIELD_KEYS.ticketQuantity, field_value: String(data.quantity) },
+      { key: FIELD_KEYS.ticketQuantityLegacy, field_value: String(data.quantity) },
+    ];
     // Single event tag for the buyer. Tier is captured on the product /
     // ticket_tier custom field + opportunity, not in a tag.
     const tags = [eventTag(data.city)];
@@ -219,16 +220,10 @@ export const submitCheckoutToGhl = createServerFn({ method: "POST" })
         if (pipeline && stageId) {
           // Opportunity custom fields: ticket count + event/cohort details
           // (so emails can merge {{opportunity.sp_cohort_*}}).
-          const oppCustomFields: Array<{ key: string; field_value: string }> =
-            data.tier === "vip"
-              ? [
-                  { key: OPP_FIELD_KEYS.ticketsPurchased, field_value: String(data.quantity) },
-                  {
-                    key: OPP_FIELD_KEYS.ticketsPurchasedLegacy,
-                    field_value: String(data.quantity),
-                  },
-                ]
-              : [];
+          const oppCustomFields: Array<{ key: string; field_value: string }> = [
+            { key: OPP_FIELD_KEYS.ticketsPurchased, field_value: String(data.quantity) },
+            { key: OPP_FIELD_KEYS.ticketsPurchasedLegacy, field_value: String(data.quantity) },
+          ];
           const cohortPairs: Array<[string, string | undefined]> = [
             [OPP_FIELD_KEYS.cohortLocation, data.event?.name],
             [OPP_FIELD_KEYS.cohortDate, data.event?.date],
@@ -1056,8 +1051,10 @@ async function resolveTicketQuantity(contactId: string, email = ""): Promise<num
   } catch (err) {
     console.warn("GHL contact ticket-count lookup failed:", (err as Error).message);
   }
-  if (Number.isFinite(contactQty) && contactQty > 0) return contactQty;
-  return fetchOpportunityTicketCount(contactId, email);
+  // Take the max across sources so a stale/low contact field never masks the
+  // real purchased count from the order/opportunity (and vice-versa).
+  const oppTickets = await fetchOpportunityTicketCount(contactId, email);
+  return Math.max(Number.isFinite(contactQty) ? contactQty : 0, oppTickets);
 }
 
 function assertAdmin(password: string) {
@@ -1220,12 +1217,7 @@ export const getPurchaserDetail = createServerFn({ method: "POST" })
     const oppTickets = await fetchOpportunityTicketCount(data.contactId, c.email ?? "");
 
     return {
-      ticketQuantity:
-        Number.isFinite(contactQty) && contactQty > 0
-          ? contactQty
-          : oppTickets > 0
-            ? oppTickets
-            : 0,
+      ticketQuantity: Math.max(Number.isFinite(contactQty) ? contactQty : 0, oppTickets),
       answers: {
         // Agency state lives in the native contact State field.
         agencyState: c.state ?? "",
