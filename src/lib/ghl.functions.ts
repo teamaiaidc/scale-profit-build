@@ -1022,6 +1022,44 @@ async function fetchOpportunityTicketCount(contactId: string, email = ""): Promi
   }
 }
 
+// Single source of truth for "how many tickets did this buyer purchase", used by
+// BOTH the Attendees table and the detail dialog so their numbers always match.
+// Prefers the contact custom field (set by the GHL workflow), then falls back to
+// the opportunity / payment count. The contacts/search endpoint doesn't return
+// custom field values, so this does a per-contact GET.
+async function resolveTicketQuantity(contactId: string, email = ""): Promise<number> {
+  if (!contactId) return 0;
+  let contactQty = 0;
+  try {
+    const fieldMeta = await getFieldMeta();
+    const res = (await ghlFetch(`/contacts/${contactId}`, { method: "GET" })) as {
+      contact?: {
+        customFields?: Array<{ id?: string; value?: unknown; field_value?: unknown }>;
+      };
+    };
+    const valueOf = (key: string) => {
+      for (const f of res.contact?.customFields ?? []) {
+        if (f.id && fieldMeta.get(f.id)?.key === key) {
+          const v = f.value ?? f.field_value ?? "";
+          return Array.isArray(v) ? v.join(", ") : String(v);
+        }
+      }
+      return "";
+    };
+    contactQty = Number.parseInt(
+      valueOf(FIELD_KEYS.ticketQuantity) ||
+        valueOf(FIELD_KEYS.ticketQuantityLegacy) ||
+        valueOf(FIELD_KEYS.ticketQuantityLegacy2) ||
+        valueOf(FIELD_KEYS.ticketQuantityLegacy3),
+      10,
+    );
+  } catch (err) {
+    console.warn("GHL contact ticket-count lookup failed:", (err as Error).message);
+  }
+  if (Number.isFinite(contactQty) && contactQty > 0) return contactQty;
+  return fetchOpportunityTicketCount(contactId, email);
+}
+
 function assertAdmin(password: string) {
   const expected = process.env.ADMIN_PASSWORD;
   if (!expected) throw new Error("ADMIN_PASSWORD is not configured on the server.");
@@ -1105,7 +1143,7 @@ export const listSeminarPurchasers = createServerFn({ method: "POST" })
               console.warn("GHL paid-amount lookup failed:", (err as Error).message);
               return 0;
             }),
-            fetchOpportunityTicketCount(contactId, c.email ?? "").catch((err) => {
+            resolveTicketQuantity(contactId, c.email ?? "").catch((err) => {
               console.warn("GHL ticket-count lookup failed:", (err as Error).message);
               return 0;
             }),
