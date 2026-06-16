@@ -1,15 +1,13 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, RefreshCw, ShieldCheck, ArrowLeft } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Check, ShieldCheck, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   listGhlProducts,
-  lookupGhlContactByEmail,
-  pushGhlContactUpdate,
   submitCheckoutToGhl,
   type GhlProduct,
   type GhlPrice,
@@ -198,10 +196,13 @@ function CheckoutPage() {
   }, []);
 
   const navigate = useNavigate();
-  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const submitToGhl = useServerFn(submitCheckoutToGhl);
+  // Two-step checkout: (1) questions, (2) payment. Name, email, phone, card and
+  // quantity are all collected once inside the embedded GHL payment form.
+  const [step, setStep] = useState<1 | 2>(1);
 
-  // Quantity is now chosen inside the GHL payment form; we always treat this
-  // app's order as a single base ticket for the summary/contact record.
+  // Quantity is chosen inside the GHL payment form; we treat this app's order as
+  // a single base ticket for the summary.
   const selectedQty = 1;
 
   const [survey, setSurvey] = useState({
@@ -211,14 +212,6 @@ function CheckoutPage() {
     shirtSize: "",
   });
   const [surveyError, setSurveyError] = useState<string | null>(null);
-
-  const [yourInfo, setYourInfo] = useState({
-    firstName: "",
-    lastName: "",
-    email: emailFromUrl ?? "",
-    phone: "",
-    countryCode: "+1",
-  });
 
   const selected = useMemo(() => {
     if (isVip) return { qty: 1, label: "Scale & Profit - VIP", price: live.vip ?? 1600 };
@@ -237,21 +230,26 @@ function CheckoutPage() {
       event_name: cityInfo.name,
       event_date: cityInfo.date,
       ticket_tier: isVip ? "VIP" : "General Admission",
-      first_name: yourInfo.firstName,
-      last_name: yourInfo.lastName,
-      email: yourInfo.email,
-      phone: `${yourInfo.countryCode.replace(/[^+\d]/g, "")}${yourInfo.phone}`,
+      // Survey answers passed through so GHL captures them on submit (requires
+      // matching hidden fields in the GHL form). The survey is also attached to
+      // the contact server-side on payment success as a fallback.
+      agency_state: survey.agencyState,
+      has_moa: survey.hasMoa,
+      attended_before: survey.attendedBefore,
+      shirt_size: survey.shirtSize,
+      // Prefill email only when it arrived in the URL (no double entry).
+      ...(emailFromUrl ? { email: emailFromUrl } : {}),
     };
     for (const [k, v] of Object.entries(params)) if (v) u.searchParams.set(k, v);
     return u.toString();
-  }, [paymentFormUrl, city, cityInfo.name, cityInfo.date, isVip, yourInfo]);
+  }, [paymentFormUrl, city, cityInfo.name, cityInfo.date, isVip, survey, emailFromUrl]);
 
   // When the embedded GHL payment form reports a successful submission, take
   // the buyer straight to our confirmation/loop page instead of GHL's default
   // thank-you screen. GHL's form_embed.js posts messages from its origin when
   // the form is submitted — match loosely to cover variants.
   useEffect(() => {
-    if (step !== 3) return;
+    if (step !== 2) return;
     const onMessage = (e: MessageEvent) => {
       try {
         const origin = e.origin || "";
@@ -296,15 +294,47 @@ function CheckoutPage() {
           }
         }
 
+        // Pull the buyer's identity out of the GHL form payload so we can attach
+        // the survey to the same contact (matched by email) and prefill the
+        // confirmation page — without ever asking for name/email in our own form.
+        const buyerEmail = str.match(/[\w.+-]+@[\w-]+\.[\w.-]+/)?.[0];
+        const fullName = str.match(/"full_name"\s*:\s*"([^"]+)"/i)?.[1]?.trim() ?? "";
+        const [firstName = "", ...rest] = fullName.split(/\s+/);
+        const lastName = rest.join(" ");
+
+        // Attach the survey + event details to the contact GHL just created.
+        if (buyerEmail) {
+          submitToGhl({
+            data: {
+              firstName,
+              lastName,
+              email: buyerEmail,
+              phone: "",
+              city: city ?? "boston",
+              tier: isVip ? "vip" : "ga",
+              quantity: isVip ? 1 : qty,
+              amount: total,
+              survey,
+              event: {
+                name: cityInfo.name,
+                date: cityInfo.date,
+                venue: cityInfo.venue,
+                address: cityInfo.address,
+                time: events.find((ev: EventRow) => ev.slug === (city ?? "boston"))?.time,
+              },
+            },
+          }).catch((err) => console.warn("GHL survey attach failed:", err));
+        }
+
         navigate({
           to: "/confirmation",
           search: {
             city: city ?? "boston",
             tier: isVip ? "vip" : "ga",
             qty,
-            email: yourInfo.email || undefined,
-            firstName: yourInfo.firstName || undefined,
-            lastName: yourInfo.lastName || undefined,
+            email: buyerEmail || undefined,
+            firstName: firstName || undefined,
+            lastName: lastName || undefined,
           },
         });
       } catch {
@@ -313,93 +343,10 @@ function CheckoutPage() {
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [step, navigate, city, isVip, gaOptions, yourInfo]);
+  }, [step, navigate, city, isVip, gaOptions, survey, total, cityInfo, events, submitToGhl]);
 
-
-
-  const submitToGhl = useServerFn(submitCheckoutToGhl);
-  const lookupGhl = useServerFn(lookupGhlContactByEmail);
-  const pushGhl = useServerFn(pushGhlContactUpdate);
-  const submitting = false;
-  const [submitError, setSubmitError] = useState<string | null>(null);
-
-  // ===== GHL contact sync (prefill name/phone from an existing contact) =====
-  const [ghlContactId, setGhlContactId] = useState<string | null>(null);
-  const [syncStatus, setSyncStatus] = useState<"idle" | "syncing" | "synced" | "error">("idle");
-  const [syncError, setSyncError] = useState<string | null>(null);
-
-  const lookupTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const runLookup = useCallback(
-    async (email: string) => {
-      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return;
-      setSyncStatus("syncing");
-      setSyncError(null);
-      try {
-        const res = await lookupGhl({ data: { email } });
-        if (res.contact) {
-          setGhlContactId(res.contact.id);
-          setYourInfo((prev) => ({
-            ...prev,
-            firstName: prev.firstName || res.contact!.firstName || "",
-            lastName: prev.lastName || res.contact!.lastName || "",
-            phone: prev.phone || res.contact!.phone || "",
-          }));
-        } else {
-          setGhlContactId(null);
-        }
-        setSyncStatus("synced");
-      } catch (err) {
-        setSyncStatus("error");
-        setSyncError(err instanceof Error ? err.message : "Sync failed");
-      }
-    },
-    [lookupGhl],
-  );
-
-  // Debounced lookup on email change
-  useEffect(() => {
-    if (lookupTimer.current) clearTimeout(lookupTimer.current);
-    if (!yourInfo.email) return;
-    lookupTimer.current = setTimeout(() => runLookup(yourInfo.email), 600);
-    return () => {
-      if (lookupTimer.current) clearTimeout(lookupTimer.current);
-    };
-  }, [yourInfo.email, runLookup]);
-
-  // Pre-fetch if email is in URL
-  useEffect(() => {
-    if (emailFromUrl) runLookup(emailFromUrl);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const schedulePush = useCallback(
-    (payload: {
-      firstName?: string;
-      lastName?: string;
-      phone?: string;
-      customFields?: Array<{ id: string; value: string }>;
-    }) => {
-      if (!ghlContactId) return;
-      if (pushTimer.current) clearTimeout(pushTimer.current);
-      pushTimer.current = setTimeout(async () => {
-        setSyncStatus("syncing");
-        try {
-          await pushGhl({ data: { contactId: ghlContactId, ...payload } });
-          setSyncStatus("synced");
-        } catch (err) {
-          setSyncStatus("error");
-          setSyncError(err instanceof Error ? err.message : "Push failed");
-        }
-      }, 800);
-    },
-    [ghlContactId, pushGhl],
-  );
-
-  // Questions → Payment: validate, then reveal the embedded GHL payment form
-  // immediately. The GHL contact/opportunity save runs in the background so
-  // the buyer isn't stuck waiting on 3–4 GHL round-trips before they can pay.
+  // Questions → Payment: validate the survey, then reveal the GHL payment form
+  // (which collects name, email, phone, card and quantity in one place).
   const goToPaymentFromSurvey = () => {
     if (
       !survey.agencyState.trim() ||
@@ -411,36 +358,7 @@ function CheckoutPage() {
       return;
     }
     setSurveyError(null);
-    setSubmitError(null);
-
-    // Fire-and-forget: capture the buyer + survey in GHL in the background.
-    submitToGhl({
-      data: {
-        firstName: yourInfo.firstName,
-        lastName: yourInfo.lastName,
-        email: yourInfo.email,
-        phone: `${yourInfo.countryCode.replace(/[^+\d]/g, "")}${yourInfo.phone}`,
-        city: city ?? "boston",
-        tier: (tier === "vip" ? "vip" : "ga") as "ga" | "vip",
-        quantity: isVip ? 1 : selectedQty,
-        amount: total,
-        survey,
-        event: {
-          name: cityInfo.name,
-          date: cityInfo.date,
-          venue: cityInfo.venue,
-          address: cityInfo.address,
-          time: events.find((e: EventRow) => e.slug === (city ?? "boston"))?.time,
-        },
-      },
-    }).catch((err) => {
-      console.warn("Background GHL submit failed:", err);
-      setSubmitError(
-        err instanceof Error ? err.message : "Could not save your details, but you can still pay.",
-      );
-    });
-
-    setStep(3);
+    setStep(2);
   };
 
   return (
@@ -479,9 +397,8 @@ function CheckoutPage() {
             <Card className="p-6">
               <div className="mb-6 flex items-center gap-2 text-sm">
                 {[
-                  [1, "Your Info"],
-                  [2, "A Few Questions"],
-                  [3, "Payment"],
+                  [1, "A Few Questions"],
+                  [2, "Payment"],
                 ].map(([n, label]) => (
                   <div key={n} className="flex items-center gap-2">
                     <span
@@ -500,98 +417,13 @@ function CheckoutPage() {
                     >
                       {label}
                     </span>
-                    {n !== 3 && <span className="mx-2 h-px w-8 bg-border" />}
+                    {n !== 2 && <span className="mx-2 h-px w-8 bg-border" />}
                   </div>
                 ))}
               </div>
 
               <form onSubmit={(e) => e.preventDefault()} className="space-y-5" suppressHydrationWarning>
                 {step === 1 && (
-                  <>
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <Field label="First name">
-                        <Input
-                          required
-                          value={yourInfo.firstName}
-                          onChange={(e) => setYourInfo({ ...yourInfo, firstName: e.target.value })}
-                          onBlur={(e) => schedulePush({ firstName: e.target.value })}
-                        />
-                      </Field>
-                      <Field label="Last name">
-                        <Input
-                          required
-                          value={yourInfo.lastName}
-                          onChange={(e) => setYourInfo({ ...yourInfo, lastName: e.target.value })}
-                          onBlur={(e) => schedulePush({ lastName: e.target.value })}
-                        />
-                      </Field>
-                    </div>
-                    <Field label="Email">
-                      <div className="flex gap-2">
-                        <Input
-                          type="email"
-                          required
-                          value={yourInfo.email}
-                          onChange={(e) => setYourInfo({ ...yourInfo, email: e.target.value })}
-                          onBlur={(e) => runLookup(e.target.value)}
-                        />
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="icon"
-                          onClick={() => runLookup(yourInfo.email)}
-                          disabled={!yourInfo.email || syncStatus === "syncing"}
-                          title="Sync from GHL"
-                        >
-                          <RefreshCw
-                            className={`h-4 w-4 ${syncStatus === "syncing" ? "animate-spin" : ""}`}
-                          />
-                        </Button>
-                      </div>
-                      <SyncIndicator
-                        status={syncStatus}
-                        error={syncError}
-                        hasContact={!!ghlContactId}
-                      />
-                    </Field>
-                    <Field label="Phone">
-                      <div className="flex gap-2">
-                        <select
-                          className="h-9 rounded-md border border-input bg-transparent px-2 text-sm"
-                          value={yourInfo.countryCode}
-                          onChange={(e) =>
-                            setYourInfo({ ...yourInfo, countryCode: e.target.value })
-                          }
-                        >
-                          <option value="+1">🇺🇸 +1</option>
-                          <option value="+44">🇬🇧 +44</option>
-                          <option value="+1ca">🇨🇦 +1</option>
-                          <option value="+61">🇦🇺 +61</option>
-                        </select>
-                        <Input
-                          type="tel"
-                          required
-                          value={yourInfo.phone}
-                          onChange={(e) => setYourInfo({ ...yourInfo, phone: e.target.value })}
-                          onBlur={(e) =>
-                            schedulePush({
-                              phone: `${yourInfo.countryCode.replace(/[^+\d]/g, "")}${e.target.value}`,
-                            })
-                          }
-                        />
-                      </div>
-                    </Field>
-
-                    <Button type="button" className="w-full" onClick={() => setStep(2)}>
-                      Continue
-                    </Button>
-                    <p className="text-center text-xs text-muted-foreground">
-                      We Respect Your Privacy & Information.
-                    </p>
-                  </>
-                )}
-
-                {step === 2 && (
                   <>
                     <p className="text-sm text-muted-foreground">
                       A few quick questions before we finalize your order.
@@ -666,38 +498,22 @@ function CheckoutPage() {
                     </div>
 
                     {surveyError && <p className="text-xs text-destructive">{surveyError}</p>}
-                    {submitError && <p className="text-xs text-destructive">{submitError}</p>}
-                    <div className="flex gap-3">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => setStep(1)}
-                        disabled={submitting}
-                      >
-                        Back
-                      </Button>
-                      <Button
-                        type="button"
-                        className="flex-1"
-                        onClick={goToPaymentFromSurvey}
-                        disabled={submitting}
-                      >
-                        {submitting ? "Saving…" : "Continue to Payment"}
-                      </Button>
-                    </div>
+                    <Button type="button" className="w-full" onClick={goToPaymentFromSurvey}>
+                      Continue to Payment
+                    </Button>
                   </>
                 )}
 
-                {step === 3 && (
+                {step === 2 && (
                   <>
                     <div className="flex items-center justify-between gap-3">
                       <div>
                         <h3 className="text-lg font-bold">Complete Your Payment</h3>
                         <p className="text-sm text-muted-foreground">
-                          Your details are saved — finish securely below to confirm your seat.
+                          Enter your details and pay securely below to confirm your seat.
                         </p>
                       </div>
-                      <Button type="button" variant="outline" size="sm" onClick={() => setStep(2)}>
+                      <Button type="button" variant="outline" size="sm" onClick={() => setStep(1)}>
                         Back
                       </Button>
                     </div>
@@ -784,18 +600,5 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       {children}
     </div>
   );
-}
-
-function SyncIndicator({
-  status,
-  error,
-}: {
-  status: "idle" | "syncing" | "synced" | "error";
-  error: string | null;
-  hasContact: boolean;
-}) {
-  if (status === "syncing")
-    return <p className="mt-1 text-xs text-muted-foreground">Syncing…</p>;
-  return null;
 }
 
