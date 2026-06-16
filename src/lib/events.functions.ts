@@ -14,11 +14,11 @@ export const listEvents = createServerFn({ method: "GET" }).handler(
 export const verifyAdminPassword = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => z.object({ password: z.string().min(1) }).parse(d))
   .handler(async ({ data }) => {
-    const expected = process.env.ADMIN_PASSWORD;
+    const expected = (process.env.ADMIN_PASSWORD ?? "").trim();
     if (!expected) {
-      throw new Error("ADMIN_PASSWORD is not configured on the server.");
+      throw new Error("Admin password is not configured on the server. Please set ADMIN_PASSWORD.");
     }
-    if (data.password.trim() !== expected.trim()) {
+    if (data.password.trim() !== expected) {
       throw new Error("Unauthorized: incorrect password.");
     }
     return { ok: true as const };
