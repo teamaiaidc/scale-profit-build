@@ -652,8 +652,8 @@ function PurchasesView({
                     <TableHead>Phone</TableHead>
                     <TableHead>Tier</TableHead>
                     <TableHead>Type</TableHead>
-                    <TableHead className="text-center">Tickets</TableHead>
-                    <TableHead className="text-center">Purchased / To Add</TableHead>
+                    <TableHead className="text-center">Tickets Purchased</TableHead>
+                    <TableHead className="text-center">To Add Remaining</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -689,18 +689,14 @@ function PurchasesView({
                           {p.isAttendee || qty === 0 ? (
                             "—"
                           ) : (
-                            <span>
-                              <span className="font-medium">{qty}</span>
-                              <span className="text-muted-foreground"> / </span>
-                              <span
-                                className={
-                                  remaining > 0
-                                    ? "font-semibold text-primary"
-                                    : "text-muted-foreground"
-                                }
-                              >
-                                {remaining}
-                              </span>
+                            <span
+                              className={
+                                remaining > 0
+                                  ? "font-semibold text-primary"
+                                  : "text-muted-foreground"
+                              }
+                            >
+                              {remaining}
                             </span>
                           )}
                         </TableCell>

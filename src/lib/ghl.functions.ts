@@ -1092,17 +1092,26 @@ export const listSeminarPurchasers = createServerFn({ method: "POST" })
           (m, o) => Math.max(m, Number(o.monetaryValue) || 0),
           0,
         );
-        // For buyers, prefer the real amount from /payments/orders.
-        // Skip for attendees (they never paid).
+        // For buyers, look up the real paid amount (/payments/orders) and the
+        // real ticket count (opportunity field) — the same source the detail
+        // dialog uses — so the dashboard's Purchased / To Add is accurate.
+        // Attendees never paid, so default them to a single seat.
         const contactId = String(c.id ?? c.contactId ?? "");
         let amount = oppAmount;
+        let ticketQuantity = 1;
         if (!isAttendee && contactId) {
-          try {
-            const paid = await fetchPaymentAmount(contactId, c.email ?? "");
-            if (paid > 0) amount = paid;
-          } catch (err) {
-            console.warn("GHL paid-amount lookup failed:", (err as Error).message);
-          }
+          const [paid, tickets] = await Promise.all([
+            fetchPaymentAmount(contactId, c.email ?? "").catch((err) => {
+              console.warn("GHL paid-amount lookup failed:", (err as Error).message);
+              return 0;
+            }),
+            fetchOpportunityTicketCount(contactId, c.email ?? "").catch((err) => {
+              console.warn("GHL ticket-count lookup failed:", (err as Error).message);
+              return 0;
+            }),
+          ]);
+          if (paid > 0) amount = paid;
+          if (tickets > 0) ticketQuantity = tickets;
         }
         return {
           id: contactId,
@@ -1115,7 +1124,7 @@ export const listSeminarPurchasers = createServerFn({ method: "POST" })
           tags,
           eventSlug: deriveEventSlug(tags),
           tier: deriveTier(tags, c.opportunities),
-          ticketQuantity: 1,
+          ticketQuantity,
           amount,
           source: c.source ?? "",
           isAttendee,
