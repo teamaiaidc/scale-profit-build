@@ -1051,10 +1051,11 @@ async function resolveTicketQuantity(contactId: string, email = ""): Promise<num
   } catch (err) {
     console.warn("GHL contact ticket-count lookup failed:", (err as Error).message);
   }
-  // Take the max across sources so a stale/low contact field never masks the
-  // real purchased count from the order/opportunity (and vice-versa).
-  const oppTickets = await fetchOpportunityTicketCount(contactId, email);
-  return Math.max(Number.isFinite(contactQty) ? contactQty : 0, oppTickets);
+  // The contact field is authoritative (written for every tier at checkout); use
+  // it directly to avoid an extra opportunity+order lookup per buyer. Only fall
+  // back to the opportunity/order count for legacy contacts missing the field.
+  if (Number.isFinite(contactQty) && contactQty > 0) return contactQty;
+  return fetchOpportunityTicketCount(contactId, email);
 }
 
 function assertAdmin(password: string) {
@@ -1079,13 +1080,20 @@ export const listSeminarPurchasers = createServerFn({ method: "POST" })
     // contact id.
     const searchTags = [
       SEMINAR_TAG, // legacy contacts tagged before the consolidation
-      ...DEFAULT_EVENTS.map((e) => eventTag(e.slug, e.end_date)),
+      // Each event's tag, both with the 🤝 emoji and without — GHL may normalize
+      // or strip the emoji on storage, so query both forms to be safe.
+      ...DEFAULT_EVENTS.flatMap((e) => {
+        const withEmoji = eventTag(e.slug, e.end_date);
+        return [withEmoji, withEmoji.replace(/^🤝\s*/, "")];
+      }),
     ];
     const byId = new Map<string, RawSearchContact>();
     let searchError: string | null = null;
-    try {
-      const pageLimit = 100;
-      for (const tag of searchTags) {
+    const pageLimit = 100;
+    // Each tag is queried independently so one failing tag (e.g. an emoji tag
+    // GHL can't match) can't abort the others and wipe the whole list.
+    for (const tag of searchTags) {
+      try {
         for (let page = 1; page <= 20; page++) {
           const res = (await ghlFetch("/contacts/search", {
             method: "POST",
@@ -1103,70 +1111,65 @@ export const listSeminarPurchasers = createServerFn({ method: "POST" })
           }
           if (batch.length < pageLimit) break;
         }
+      } catch (err) {
+        searchError = (err as Error).message;
+        console.warn(`GHL purchaser search failed for tag "${tag}":`, searchError);
       }
-    } catch (err) {
-      searchError = (err as Error).message;
-      console.warn("GHL purchaser search failed:", searchError);
     }
     const rawContacts = [...byId.values()];
 
-    const purchasers: SeminarPurchaser[] = await mapWithConcurrency(
-      rawContacts,
-      8,
-      async (c) => {
-        const tags = (c.tags ?? []).map((t) => String(t));
-        // Buyer vs attendee: attendees are upserted with an "…Attendee" source
-        // (they never have their own purchase). Legacy contacts still carry the
-        // old attendee tag, so honour that too.
-        const isAttendee =
-          (c.source ?? "").toLowerCase().includes("attendee") ||
-          tags.includes("scale-profit-attendee");
-        // Indicative amount from the opportunity. This is set at survey-time
-        // with a default qty of 1, so for GA buyers it's almost always wrong.
-        const oppAmount = (c.opportunities ?? []).reduce(
-          (m, o) => Math.max(m, Number(o.monetaryValue) || 0),
-          0,
-        );
-        // For buyers, look up the real paid amount (/payments/orders) and the
-        // real ticket count (opportunity field) — the same source the detail
-        // dialog uses — so the dashboard's Purchased / To Add is accurate.
-        // Attendees never paid, so default them to a single seat.
-        const contactId = String(c.id ?? c.contactId ?? "");
-        let amount = oppAmount;
-        let ticketQuantity = 1;
-        if (!isAttendee && contactId) {
-          const [paid, tickets] = await Promise.all([
-            fetchPaymentAmount(contactId, c.email ?? "").catch((err) => {
-              console.warn("GHL paid-amount lookup failed:", (err as Error).message);
-              return 0;
-            }),
-            resolveTicketQuantity(contactId, c.email ?? "").catch((err) => {
-              console.warn("GHL ticket-count lookup failed:", (err as Error).message);
-              return 0;
-            }),
-          ]);
-          if (paid > 0) amount = paid;
-          if (tickets > 0) ticketQuantity = tickets;
-        }
+    // Base row built from the search result alone — no extra GHL calls, so these
+    // ALWAYS render even if the per-buyer enrichment below fails or times out.
+    const baseRow = (c: RawSearchContact): SeminarPurchaser => {
+      const tags = (c.tags ?? []).map((t) => String(t));
+      const isAttendee =
+        (c.source ?? "").toLowerCase().includes("attendee") ||
+        tags.includes("scale-profit-attendee");
+      const oppAmount = (c.opportunities ?? []).reduce(
+        (m, o) => Math.max(m, Number(o.monetaryValue) || 0),
+        0,
+      );
+      return {
+        id: String(c.id ?? c.contactId ?? ""),
+        firstName: c.firstName ?? "",
+        lastName: c.lastName ?? "",
+        name: [c.firstName, c.lastName].filter(Boolean).join(" ").trim(),
+        email: c.email ?? "",
+        phone: c.phone ?? "",
+        state: c.state ?? "",
+        tags,
+        eventSlug: deriveEventSlug(tags),
+        tier: deriveTier(tags, c.opportunities),
+        ticketQuantity: 1,
+        amount: oppAmount,
+        source: c.source ?? "",
+        isAttendee,
+        dateAdded: c.dateAdded ?? "",
+      };
+    };
+
+    // Best-effort enrichment: real paid amount + ticket count per buyer. Any
+    // failure (or the whole step) falls back to the base rows so purchasers
+    // always show.
+    let purchasers: SeminarPurchaser[];
+    try {
+      purchasers = await mapWithConcurrency(rawContacts, 6, async (c) => {
+        const row = baseRow(c);
+        if (row.isAttendee || !row.id) return row;
+        const [paid, tickets] = await Promise.all([
+          fetchPaymentAmount(row.id, row.email).catch(() => 0),
+          resolveTicketQuantity(row.id, row.email).catch(() => 0),
+        ]);
         return {
-          id: contactId,
-          firstName: c.firstName ?? "",
-          lastName: c.lastName ?? "",
-          name: [c.firstName, c.lastName].filter(Boolean).join(" ").trim(),
-          email: c.email ?? "",
-          phone: c.phone ?? "",
-          state: c.state ?? "",
-          tags,
-          eventSlug: deriveEventSlug(tags),
-          tier: deriveTier(tags, c.opportunities),
-          ticketQuantity,
-          amount,
-          source: c.source ?? "",
-          isAttendee,
-          dateAdded: c.dateAdded ?? "",
+          ...row,
+          amount: paid > 0 ? paid : row.amount,
+          ticketQuantity: tickets > 0 ? tickets : row.ticketQuantity,
         };
-      },
-    );
+      });
+    } catch (err) {
+      console.warn("GHL purchaser enrichment failed:", (err as Error).message);
+      purchasers = rawContacts.map(baseRow);
+    }
 
     return { purchasers, error: searchError };
   });
@@ -1217,7 +1220,7 @@ export const getPurchaserDetail = createServerFn({ method: "POST" })
     const oppTickets = await fetchOpportunityTicketCount(data.contactId, c.email ?? "");
 
     return {
-      ticketQuantity: Math.max(Number.isFinite(contactQty) ? contactQty : 0, oppTickets),
+      ticketQuantity: Number.isFinite(contactQty) && contactQty > 0 ? contactQty : oppTickets,
       answers: {
         // Agency state lives in the native contact State field.
         agencyState: c.state ?? "",
