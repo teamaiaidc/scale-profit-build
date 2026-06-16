@@ -6,6 +6,27 @@ const GHL_LOCATION_ID = "mVdYbXfJcF10Y7anuoNt";
 const GHL_BASE = "https://services.leadconnectorhq.com";
 const GHL_VERSION = "2021-07-28";
 
+// ===== The one tag =====
+// Every buyer + attendee carries a single tag identifying the event + date:
+//   🤝 s&p-{city}-{yymmdd}   e.g. "🤝 s&p-boston-260603"
+// No tier/seminar/attendee tags — tier comes from the purchased product, and
+// buyer-vs-attendee is told apart by the contact `source`. Event/date/year is
+// read back from this tag (and from the opportunity / admin dashboard).
+const EVENT_TAG_PREFIX = "🤝 s&p-";
+
+// "2026-06-03" → "260603"; "" if the date isn't a full ISO date.
+function yymmdd(isoDate?: string): string {
+  const m = (isoDate ?? "").match(/^\d{2}(\d{2})-(\d{2})-(\d{2})$/);
+  return m ? `${m[1]}${m[2]}${m[3]}` : "";
+}
+
+// Build the single event tag for a city slug. Falls back to the seeded events
+// list for the end date when the caller doesn't supply one.
+function eventTag(city: string, endDate?: string): string {
+  const date = yymmdd(endDate || DEFAULT_EVENTS.find((e) => e.slug === city)?.end_date);
+  return date ? `${EVENT_TAG_PREFIX}${city}-${date}` : `${EVENT_TAG_PREFIX}${city}`;
+}
+
 // GHL custom-field keys the checkout writes to the buyer contact. These must
 // match the field keys in GHL exactly (the part after `contact.` in a merge
 // tag, e.g. {{contact.do_you_have_a_moa_1}} → "do_you_have_a_moa_1").
@@ -121,12 +142,9 @@ export const submitCheckoutToGhl = createServerFn({ method: "POST" })
             { key: FIELD_KEYS.ticketQuantityLegacy, field_value: String(data.quantity) },
           ]
         : [];
-    const tags = [
-      "scale-profit-seminar",
-      `scale-profit-${data.city}`,
-      `scale-profit-${data.tier}`,
-      `scale-profit-${data.city}-${data.tier}`,
-    ];
+    // Single event tag for the buyer. Tier is captured on the product /
+    // ticket_tier custom field + opportunity, not in a tag.
+    const tags = [eventTag(data.city)];
 
     // 1. Upsert primary buyer contact + fetch pipelines in parallel
     //    (pipelines lookup doesn't depend on the contact, so we save a
@@ -184,7 +202,7 @@ export const submitCheckoutToGhl = createServerFn({ method: "POST" })
                 firstName: a.firstName,
                 lastName: a.lastName,
                 email: a.email,
-                tags: [...tags, "scale-profit-attendee"],
+                tags,
                 source: "Scale & Profit Seminar Attendee",
               }),
             }),
@@ -798,17 +816,10 @@ const addAttendeesSchema = z.object({
 export const addAttendeesToGhl = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => addAttendeesSchema.parse(d))
   .handler(async ({ data }) => {
-    // Event tag: s&p-{slug}-{endDate} (e.g. s&p-boston-2026-06-03), uniquely
-    // identifying which event/date the ticket was purchased for.
-    const endDate =
-      data.endDate || DEFAULT_EVENTS.find((e) => e.slug === data.city)?.end_date || "";
-    const eventTag = endDate ? `s&p-${data.city}-${endDate}` : `s&p-${data.city}`;
-    const tags = [
-      eventTag,
-      "scale-profit-seminar",
-      `scale-profit-${data.tier}`,
-      "scale-profit-attendee",
-    ];
+    // Single event tag (🤝 s&p-{city}-{yymmdd}) — same tag the buyer carries, so
+    // attendees group under the same event. Buyer-vs-attendee is told apart by
+    // the contact `source`, not a tag.
+    const tags = [eventTag(data.city, data.endDate)];
     const results = await Promise.allSettled(
       data.attendees
         .filter((a) => a.email)
@@ -833,8 +844,9 @@ export const addAttendeesToGhl = createServerFn({ method: "POST" })
 
 // ============== Admin: purchasers / attendees ==============
 
-// Every checkout + attendee contact carries this tag, so it's the master filter
-// for "everyone connected to a Scale & Profit event".
+// Legacy umbrella tag. New contacts no longer get it (they carry only the single
+// 🤝 s&p-{city}-{yymmdd} event tag), but the admin still searches it so contacts
+// tagged before the consolidation keep showing up.
 const SEMINAR_TAG = "scale-profit-seminar";
 
 export type PurchaserCustomField = {
@@ -891,7 +903,7 @@ type RawSearchContact = {
   source?: string;
   dateAdded?: string;
   tags?: string[];
-  opportunities?: Array<{ monetaryValue?: number }>;
+  opportunities?: Array<{ monetaryValue?: number; name?: string }>;
 };
 
 // GHL field keys come back as `contact.<key>` / `opportunity.<key>`; compare bare keys.
@@ -899,13 +911,14 @@ function bareFieldKey(key: string): string {
   return key.replace(/^(contact|opportunity)\./, "");
 }
 
-// Work out which event a contact belongs to. Buyers carry a `scale-profit-{slug}`
-// tag; attendees carry an `s&p-{slug}-{endDate}` tag instead.
+// Work out which event a contact belongs to, from the single event tag
+// `🤝 s&p-{slug}-{yymmdd}`. Also tolerates legacy tags (`s&p-{slug}-{YYYY-MM-DD}`,
+// `scale-profit-{slug}`) so contacts tagged before the consolidation still map.
 function deriveEventSlug(tags: string[]): string {
   const reserved = new Set(["seminar", "ga", "vip", "attendee"]);
   for (const t of tags) {
-    const attendeeMatch = t.match(/^s&p-([a-z0-9-]+?)-\d{4}-\d{2}-\d{2}$/i);
-    if (attendeeMatch) return attendeeMatch[1].toLowerCase();
+    const eventMatch = t.match(/s&p-([a-z0-9-]+?)-(?:\d{6}|\d{4}-\d{2}-\d{2})$/i);
+    if (eventMatch) return eventMatch[1].toLowerCase();
     const buyerMatch = t.match(/^scale-profit-([a-z0-9-]+)$/i);
     if (buyerMatch && !reserved.has(buyerMatch[1].toLowerCase())) {
       return buyerMatch[1].toLowerCase();
@@ -914,8 +927,15 @@ function deriveEventSlug(tags: string[]): string {
   return "";
 }
 
-// Tier from the `scale-profit-vip` / `scale-profit-ga` tag.
-function deriveTier(tags: string[]): string {
+// Tier is the product they purchased (GA/VIP), not a tag. Read it from the
+// opportunity name (`… — VIP (city)` / `… — General Admission (city)`), falling
+// back to legacy `scale-profit-vip|ga` tags for pre-consolidation contacts.
+function deriveTier(tags: string[], opportunities?: Array<{ name?: string }>): string {
+  for (const o of opportunities ?? []) {
+    const n = (o.name ?? "").toLowerCase();
+    if (/\bvip\b/.test(n)) return "VIP";
+    if (/general admission/.test(n)) return "General Admission";
+  }
   if (tags.some((t) => /^scale-profit-vip$/i.test(t))) return "VIP";
   if (tags.some((t) => /^scale-profit-ga$/i.test(t))) return "General Admission";
   return "";
@@ -1018,36 +1038,54 @@ export const listSeminarPurchasers = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     assertAdmin(data.password);
 
-    // Search every seminar contact by tag, paging until exhausted (capped).
-    const rawContacts: RawSearchContact[] = [];
+    // Each contact now carries only the per-event tag (🤝 s&p-{city}-{yymmdd}),
+    // so there's no single umbrella tag to search. Query each known event's tag
+    // (plus the legacy umbrella tag for pre-consolidation contacts) and dedupe by
+    // contact id.
+    const searchTags = [
+      SEMINAR_TAG, // legacy contacts tagged before the consolidation
+      ...DEFAULT_EVENTS.map((e) => eventTag(e.slug, e.end_date)),
+    ];
+    const byId = new Map<string, RawSearchContact>();
     let searchError: string | null = null;
     try {
       const pageLimit = 100;
-      for (let page = 1; page <= 20; page++) {
-        const res = (await ghlFetch("/contacts/search", {
-          method: "POST",
-          body: JSON.stringify({
-            locationId: GHL_LOCATION_ID,
-            page,
-            pageLimit,
-            filters: [{ field: "tags", operator: "contains", value: SEMINAR_TAG }],
-          }),
-        })) as { contacts?: RawSearchContact[] };
-        const batch = res.contacts ?? [];
-        rawContacts.push(...batch);
-        if (batch.length < pageLimit) break;
+      for (const tag of searchTags) {
+        for (let page = 1; page <= 20; page++) {
+          const res = (await ghlFetch("/contacts/search", {
+            method: "POST",
+            body: JSON.stringify({
+              locationId: GHL_LOCATION_ID,
+              page,
+              pageLimit,
+              filters: [{ field: "tags", operator: "contains", value: tag }],
+            }),
+          })) as { contacts?: RawSearchContact[] };
+          const batch = res.contacts ?? [];
+          for (const c of batch) {
+            const id = String(c.id ?? c.contactId ?? "");
+            if (id) byId.set(id, c);
+          }
+          if (batch.length < pageLimit) break;
+        }
       }
     } catch (err) {
       searchError = (err as Error).message;
       console.warn("GHL purchaser search failed:", searchError);
     }
+    const rawContacts = [...byId.values()];
 
     const purchasers: SeminarPurchaser[] = await mapWithConcurrency(
       rawContacts,
       8,
       async (c) => {
         const tags = (c.tags ?? []).map((t) => String(t));
-        const isAttendee = tags.includes("scale-profit-attendee");
+        // Buyer vs attendee: attendees are upserted with an "…Attendee" source
+        // (they never have their own purchase). Legacy contacts still carry the
+        // old attendee tag, so honour that too.
+        const isAttendee =
+          (c.source ?? "").toLowerCase().includes("attendee") ||
+          tags.includes("scale-profit-attendee");
         // Indicative amount from the opportunity. This is set at survey-time
         // with a default qty of 1, so for GA buyers it's almost always wrong.
         const oppAmount = (c.opportunities ?? []).reduce(
@@ -1076,7 +1114,7 @@ export const listSeminarPurchasers = createServerFn({ method: "POST" })
           state: c.state ?? "",
           tags,
           eventSlug: deriveEventSlug(tags),
-          tier: deriveTier(tags),
+          tier: deriveTier(tags, c.opportunities),
           ticketQuantity: 1,
           amount,
           source: c.source ?? "",
