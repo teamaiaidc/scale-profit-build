@@ -389,6 +389,13 @@ function CheckoutPage() {
       return;
     }
     setSurveyError(null);
+    // Bridge the survey to the confirmation page (same browser) so it can be
+    // saved to the contact once GHL redirects there with the buyer's email.
+    try {
+      window.localStorage.setItem("sp-pending-survey", JSON.stringify(survey));
+    } catch {
+      /* ignore private-mode / quota errors */
+    }
     setStep(2);
   };
 

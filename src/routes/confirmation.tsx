@@ -46,9 +46,25 @@ function ConfirmationPage() {
   const tagBuyer = useServerFn(tagBuyerForEvent);
   useEffect(() => {
     if (!email || !city) return;
-    tagBuyer({ data: { email, city } }).catch(() => {
-      /* non-blocking — admin can still bulk-assign from the dashboard */
-    });
+    // Pull the survey the buyer answered at checkout (saved in this browser).
+    let survey: Record<string, string> | undefined;
+    try {
+      const raw = window.localStorage.getItem("sp-pending-survey");
+      if (raw) survey = JSON.parse(raw);
+    } catch {
+      /* ignore */
+    }
+    tagBuyer({ data: { email, city, survey } })
+      .then(() => {
+        try {
+          window.localStorage.removeItem("sp-pending-survey");
+        } catch {
+          /* ignore */
+        }
+      })
+      .catch(() => {
+        /* non-blocking — admin can still bulk-assign from the dashboard */
+      });
   }, [email, city, tagBuyer]);
 
   // Greet the buyer by name. The name may arrive in the URL; if not but we have

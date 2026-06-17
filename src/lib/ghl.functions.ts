@@ -147,8 +147,9 @@ export const submitCheckoutToGhl = createServerFn({ method: "POST" })
       { key: FIELD_KEYS.ticketQuantity, field_value: String(data.quantity) },
       { key: FIELD_KEYS.ticketQuantityLegacy, field_value: String(data.quantity) },
     ];
-    // Tag the buyer 🤝 s&p-{city}-{yymmdd} on purchase, in code.
-    const tags = [eventTag(data.city)];
+    // NOTE: tagging is done in ONE place only — tagBuyerForEvent on the
+    // confirmation page (reached via GHL's redirect). We deliberately do NOT
+    // tag here, so a buyer never gets two tags. We omit `tags` from the upsert.
 
     // 1. Upsert primary buyer contact + fetch pipelines in parallel
     //    (pipelines lookup doesn't depend on the contact, so we save a
@@ -161,7 +162,6 @@ export const submitCheckoutToGhl = createServerFn({ method: "POST" })
         lastName: data.lastName,
         email: data.email,
         phone: data.phone,
-        tags,
         source: "Scale & Profit Seminar Checkout",
         // Agency state maps to GHL's native contact "State" field
         // ({{contact.state}}), so it's a top-level property, not a custom field.
@@ -1334,21 +1334,49 @@ export const assignContactsToEvent = createServerFn({ method: "POST" })
 const tagBuyerSchema = z.object({
   email: z.string().email().max(200),
   city: z.string().min(1).max(50),
+  // Survey answers from checkout (bridged via the buyer's browser), saved to the
+  // contact so the admin card can show them.
+  survey: z
+    .object({
+      agencyState: z.string().max(100).optional(),
+      hasMoa: z.string().max(50).optional(),
+      attendedBefore: z.string().max(50).optional(),
+      shirtSize: z.string().max(50).optional(),
+    })
+    .optional(),
 });
 
-// Tags a buyer 🤝 s&p-{city}-{yymmdd} by email. Called from the confirmation page
-// after a successful purchase (GHL redirects there with {{contact.email}} +
-// {{contact.event_city}}), so tagging doesn't depend on the flaky in-page
-// payment message. Looks up the contact and adds the tag (additive).
+// Finalizes a purchase from the confirmation page (GHL redirects there with
+// {{contact.email}} + {{contact.event_city}}): adds the SINGLE event tag
+// 🤝 s&p-{city}-{yymmdd} and saves the checkout survey answers to the contact.
+// This is the one and only place a buyer is tagged. Additive — never removes
+// existing tags, and re-running it just re-applies the same tag (no duplicate).
 export const tagBuyerForEvent = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => tagBuyerSchema.parse(d))
   .handler(async ({ data }) => {
     const tag = eventTag(data.city);
-    // Upsert by email to resolve the contact id (no tags here — don't disturb
-    // existing tags), then add the tag via the additive add-tags endpoint.
+    const s = data.survey;
+    // Upsert by email to resolve the contact id and (optionally) save the survey
+    // answers — agency state to the native State field, the rest to custom
+    // fields. No tags here so existing tags aren't disturbed.
     const up = (await ghlFetch("/contacts/upsert", {
       method: "POST",
-      body: JSON.stringify({ locationId: GHL_LOCATION_ID, email: data.email }),
+      body: JSON.stringify({
+        locationId: GHL_LOCATION_ID,
+        email: data.email,
+        ...(s?.agencyState ? { state: s.agencyState } : {}),
+        ...(s
+          ? {
+              customFields: [
+                ...(s.hasMoa ? [{ key: FIELD_KEYS.hasMoa, field_value: s.hasMoa }] : []),
+                ...(s.attendedBefore
+                  ? [{ key: FIELD_KEYS.attendedBefore, field_value: s.attendedBefore }]
+                  : []),
+                ...(s.shirtSize ? [{ key: FIELD_KEYS.shirtSize, field_value: s.shirtSize }] : []),
+              ],
+            }
+          : {}),
+      }),
     })) as { contact?: { id?: string }; id?: string };
     const contactId = up.contact?.id ?? up.id;
     if (!contactId) return { ok: false, tag };
