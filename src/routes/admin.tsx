@@ -765,7 +765,7 @@ function PurchasesView({
                     <TableHead>Tier</TableHead>
                     <TableHead>Type</TableHead>
                     <TableHead className="text-center">Tickets Purchased</TableHead>
-                    <TableHead className="text-center">To Add Remaining</TableHead>
+                    <TableHead className="text-center">Unassigned Tickets</TableHead>
                     <TableHead>Purchased On</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -1014,7 +1014,7 @@ function PurchaserDialog({
                   <p className="text-xl font-bold">{loading ? "…" : (ticketQty ?? "—")}</p>
                 </div>
                 <div className="rounded-lg border border-primary/40 bg-primary/5 p-3">
-                  <p className="text-xs text-muted-foreground">Tickets to add remaining</p>
+                  <p className="text-xs text-muted-foreground">Unassigned tickets</p>
                   <p className="text-xl font-bold text-primary">{loading ? "…" : remaining}</p>
                 </div>
               </div>
