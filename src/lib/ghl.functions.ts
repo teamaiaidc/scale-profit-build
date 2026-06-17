@@ -1122,17 +1122,19 @@ export const listSeminarPurchasers = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     assertAdmin(data.password);
 
-    // Each contact now carries only the per-event tag (🤝 s&p-{city}-{yymmdd}),
-    // so there's no single umbrella tag to search. Query each known event's tag
-    // (plus the legacy umbrella tag for pre-consolidation contacts) and dedupe by
-    // contact id.
+    // Find every S&P purchaser by tag. Query several tag forms per event so a
+    // contact is found however it was tagged — the umbrella tag, the clean
+    // per-city tag, and the 🤝 event tag both with and without the emoji (GHL
+    // may normalize/strip the emoji on storage). Deduped by contact id.
     const searchTags = [
-      SEMINAR_TAG, // legacy contacts tagged before the consolidation
-      // Each event's tag, both with the 🤝 emoji and without — GHL may normalize
-      // or strip the emoji on storage, so query both forms to be safe.
+      SEMINAR_TAG, // scale-profit-seminar (umbrella on buyers + attendees)
       ...DEFAULT_EVENTS.flatMap((e) => {
         const withEmoji = eventTag(e.slug, e.end_date);
-        return [withEmoji, withEmoji.replace(/^🤝\s*/, "")];
+        return [
+          withEmoji, // 🤝 s&p-{city}-{yymmdd}
+          withEmoji.replace(/^🤝\s*/, ""), // s&p-{city}-{yymmdd}
+          `scale-profit-${e.slug}`, // clean per-city tag
+        ];
       }),
     ];
     const byId = new Map<string, RawSearchContact>();

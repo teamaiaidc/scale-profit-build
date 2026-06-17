@@ -576,7 +576,10 @@ function PurchasesView({
     return (
       p.name.toLowerCase().includes(q) ||
       p.email.toLowerCase().includes(q) ||
-      (p.phone || "").toLowerCase().includes(q)
+      (p.phone || "").toLowerCase().includes(q) ||
+      p.eventSlug.toLowerCase().includes(q) ||
+      p.tier.toLowerCase().includes(q) ||
+      p.tags.some((t) => t.toLowerCase().includes(q))
     );
   });
   const groups = purchasers ? groupByEvent(filtered, events) : [];
@@ -614,7 +617,7 @@ function PurchasesView({
       <div className="mb-6">
         <Input
           type="search"
-          placeholder="Search purchaser by name, email, or phone…"
+          placeholder="Search by name, email, phone, city, or tag…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="max-w-md"
