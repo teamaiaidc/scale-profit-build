@@ -5,7 +5,7 @@ import { CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { normalizeCity } from "@/lib/city";
-import { lookupGhlContactByEmail } from "@/lib/ghl.functions";
+import { lookupGhlContactByEmail, tagBuyerForEvent } from "@/lib/ghl.functions";
 import logo from "@/assets/hero-banner.webp";
 
 type Search = {
@@ -37,8 +37,19 @@ export const Route = createFileRoute("/confirmation")({
 });
 
 function ConfirmationPage() {
-  const { tier, firstName, email } = Route.useSearch();
+  const { city, tier, firstName, email } = Route.useSearch();
   const isVip = tier === "vip";
+
+  // Tag the buyer 🤝 s&p-{city}-{yymmdd} now that the purchase is done. GHL
+  // redirects here with the contact's email + event_city, so this is the
+  // reliable place to apply the tag (the in-page payment message lacks them).
+  const tagBuyer = useServerFn(tagBuyerForEvent);
+  useEffect(() => {
+    if (!email || !city) return;
+    tagBuyer({ data: { email, city } }).catch(() => {
+      /* non-blocking — admin can still bulk-assign from the dashboard */
+    });
+  }, [email, city, tagBuyer]);
 
   // Greet the buyer by name. The name may arrive in the URL; if not but we have
   // their email, look it up from GHL so the greeting still personalizes.

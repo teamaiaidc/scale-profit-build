@@ -147,11 +147,8 @@ export const submitCheckoutToGhl = createServerFn({ method: "POST" })
       { key: FIELD_KEYS.ticketQuantity, field_value: String(data.quantity) },
       { key: FIELD_KEYS.ticketQuantityLegacy, field_value: String(data.quantity) },
     ];
-    // Tagging is intentionally NOT done here — a GHL workflow applies the
-    // 🤝 s&p-{city}-{yymmdd} tag on purchase (it reads event_city / event_tag
-    // passed into the form). We omit `tags` from the upsert so we never touch
-    // or overwrite the workflow's tags. We still record event_city as a custom
-    // field so the workflow / admin always know which event this was.
+    // Tag the buyer 🤝 s&p-{city}-{yymmdd} on purchase, in code.
+    const tags = [eventTag(data.city)];
 
     // 1. Upsert primary buyer contact + fetch pipelines in parallel
     //    (pipelines lookup doesn't depend on the contact, so we save a
@@ -164,6 +161,7 @@ export const submitCheckoutToGhl = createServerFn({ method: "POST" })
         lastName: data.lastName,
         email: data.email,
         phone: data.phone,
+        tags,
         source: "Scale & Profit Seminar Checkout",
         // Agency state maps to GHL's native contact "State" field
         // ({{contact.state}}), so it's a top-level property, not a custom field.
@@ -1331,4 +1329,32 @@ export const assignContactsToEvent = createServerFn({ method: "POST" })
     });
     const assigned = results.filter(Boolean).length;
     return { ok: assigned === data.contactIds.length, assigned, failed: data.contactIds.length - assigned };
+  });
+
+const tagBuyerSchema = z.object({
+  email: z.string().email().max(200),
+  city: z.string().min(1).max(50),
+});
+
+// Tags a buyer 🤝 s&p-{city}-{yymmdd} by email. Called from the confirmation page
+// after a successful purchase (GHL redirects there with {{contact.email}} +
+// {{contact.event_city}}), so tagging doesn't depend on the flaky in-page
+// payment message. Looks up the contact and adds the tag (additive).
+export const tagBuyerForEvent = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) => tagBuyerSchema.parse(d))
+  .handler(async ({ data }) => {
+    const tag = eventTag(data.city);
+    // Upsert by email to resolve the contact id (no tags here — don't disturb
+    // existing tags), then add the tag via the additive add-tags endpoint.
+    const up = (await ghlFetch("/contacts/upsert", {
+      method: "POST",
+      body: JSON.stringify({ locationId: GHL_LOCATION_ID, email: data.email }),
+    })) as { contact?: { id?: string }; id?: string };
+    const contactId = up.contact?.id ?? up.id;
+    if (!contactId) return { ok: false, tag };
+    await ghlFetch(`/contacts/${contactId}/tags`, {
+      method: "POST",
+      body: JSON.stringify({ tags: [tag] }),
+    });
+    return { ok: true, tag };
   });
