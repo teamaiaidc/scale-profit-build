@@ -38,6 +38,7 @@ import {
   listSeminarPurchasers,
   getPurchaserDetail,
   addAttendeesToGhl,
+  assignContactsToEvent,
   type SeminarPurchaser,
   type PurchaserDetail,
 } from "@/lib/ghl.functions";
@@ -570,6 +571,49 @@ function PurchasesView({
   const [selected, setSelected] = useState<SeminarPurchaser | null>(null);
   const [search, setSearch] = useState("");
 
+  // Bulk-assign unassigned contacts to an event (adds the event tags in GHL).
+  const assignFn = useServerFn(assignContactsToEvent);
+  const upcoming = splitEvents(events, getTodayISO()).upcoming;
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [assignTo, setAssignTo] = useState("");
+  const [assigning, setAssigning] = useState(false);
+  const [assignMsg, setAssignMsg] = useState<string | null>(null);
+
+  const toggleSelected = (id: string) =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const handleBulkAssign = async () => {
+    if (!assignTo || selectedIds.size === 0) return;
+    const ev = events.find((e) => e.slug === assignTo);
+    setAssigning(true);
+    setAssignMsg(null);
+    try {
+      const res = await assignFn({
+        data: {
+          password,
+          contactIds: [...selectedIds],
+          city: assignTo,
+          endDate: ev?.end_date || undefined,
+        },
+      });
+      setAssignMsg(
+        `Assigned ${res.assigned} contact${res.assigned === 1 ? "" : "s"} to ${ev?.city || assignTo}.`,
+      );
+      setSelectedIds(new Set());
+      setAssignTo("");
+      onRefresh();
+    } catch (err) {
+      setAssignMsg(err instanceof Error ? err.message : "Assign failed.");
+    } finally {
+      setAssigning(false);
+    }
+  };
+
   const q = search.trim().toLowerCase();
   const filtered = (purchasers ?? []).filter((p) => {
     if (!q) return true;
@@ -647,6 +691,10 @@ function PurchasesView({
       <div className="space-y-8">
         {groups.map((group) => (
           <section key={group.slug}>
+            {(() => {
+              const isUnassigned = group.slug === "unknown";
+              return (
+            <>
             <div className="mb-3 flex flex-wrap items-baseline justify-between gap-4">
               <h2 className="text-lg font-bold capitalize">{group.name}</h2>
               <p className="text-sm text-muted-foreground">
@@ -654,10 +702,39 @@ function PurchasesView({
                 {group.attendees.length} attendee{group.attendees.length === 1 ? "" : "s"} added
               </p>
             </div>
+
+            {isUnassigned && (
+              <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/20 p-3">
+                <span className="text-sm text-muted-foreground">{selectedIds.size} selected</span>
+                <select
+                  className="h-9 rounded-md border border-input bg-transparent px-2 text-sm"
+                  value={assignTo}
+                  onChange={(e) => setAssignTo(e.target.value)}
+                >
+                  <option value="">Assign to event…</option>
+                  {upcoming.map((e) => (
+                    <option key={e.slug} value={e.slug}>
+                      {e.city || e.slug}
+                    </option>
+                  ))}
+                </select>
+                <Button
+                  size="sm"
+                  onClick={handleBulkAssign}
+                  disabled={assigning || !assignTo || selectedIds.size === 0}
+                >
+                  {assigning && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
+                  Assign to event
+                </Button>
+                {assignMsg && <span className="text-xs text-primary">{assignMsg}</span>}
+              </div>
+            )}
+
             <Card className="overflow-hidden">
               <Table>
                 <TableHeader>
                   <TableRow>
+                    {isUnassigned && <TableHead className="w-8" />}
                     <TableHead>Name</TableHead>
                     <TableHead>Email</TableHead>
                     <TableHead>Phone</TableHead>
@@ -680,6 +757,17 @@ function PurchasesView({
                         className="cursor-pointer"
                         onClick={() => setSelected(p)}
                       >
+                        {isUnassigned && (
+                          <TableCell onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              className="accent-primary"
+                              checked={selectedIds.has(p.id)}
+                              onChange={() => toggleSelected(p.id)}
+                              disabled={!p.id}
+                            />
+                          </TableCell>
+                        )}
                         <TableCell className="font-medium">{p.name || "—"}</TableCell>
                         <TableCell className="text-muted-foreground">{p.email || "—"}</TableCell>
                         <TableCell className="text-muted-foreground">{p.phone || "—"}</TableCell>
@@ -722,6 +810,9 @@ function PurchasesView({
                 </TableBody>
               </Table>
             </Card>
+            </>
+              );
+            })()}
           </section>
         ))}
       </div>

@@ -147,15 +147,10 @@ export const submitCheckoutToGhl = createServerFn({ method: "POST" })
       { key: FIELD_KEYS.ticketQuantity, field_value: String(data.quantity) },
       { key: FIELD_KEYS.ticketQuantityLegacy, field_value: String(data.quantity) },
     ];
-    // Tags: the 🤝 s&p-{city}-{yymmdd} tag for GHL grouping, PLUS a searchable
-    // umbrella tag and a clean per-event tag. The emoji tag alone isn't reliably
-    // searchable/parseable (GHL normalizes it), so these two keep the admin
-    // dashboard able to find and correctly group every purchaser.
-    const tags = [
-      eventTag(data.city),
-      "scale-profit-seminar",
-      `scale-profit-${data.city}`,
-    ];
+    // One centralized tag: 🤝 s&p-{city}-{yymmdd}. The admin dashboard finds
+    // purchasers by scanning contacts (matching this tag in code) + the checkout
+    // form source, so no extra discovery tags are needed.
+    const tags = [eventTag(data.city)];
 
     // 1. Upsert primary buyer contact + fetch pipelines in parallel
     //    (pipelines lookup doesn't depend on the contact, so we save a
@@ -824,14 +819,9 @@ const addAttendeesSchema = z.object({
 export const addAttendeesToGhl = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => addAttendeesSchema.parse(d))
   .handler(async ({ data }) => {
-    // Same searchable/groupable tags the buyer carries, plus the attendee marker
-    // so the admin can tell attendees apart and still find/group them by event.
-    const tags = [
-      eventTag(data.city, data.endDate),
-      "scale-profit-seminar",
-      `scale-profit-${data.city}`,
-      "scale-profit-attendee",
-    ];
+    // One centralized tag (🤝 s&p-{city}-{yymmdd}) — same as the buyer.
+    // Buyer-vs-attendee is told apart by the contact `source`, not a tag.
+    const tags = [eventTag(data.city, data.endDate)];
     const results = await Promise.allSettled(
       data.attendees
         .filter((a) => a.email)
@@ -1168,9 +1158,13 @@ export const listSeminarPurchasers = createServerFn({ method: "POST" })
     }
 
     // GHL's tag-search can't reliably match the 🤝 emoji tag, so also page through
-    // contacts and keep any carrying an S&P tag (matched here in code, where the
-    // emoji is a non-issue). Bounded so a large location can't time out the worker.
+    // contacts and keep any that are Scale & Profit purchasers — identified by an
+    // S&P tag OR by the source of the checkout forms (S&P-GenAd / S&P-vip / "Scale
+    // & Profit …"). Source-matching catches purchases that weren't auto-tagged;
+    // they show under "Unassigned" until the admin assigns them to an event.
+    // Bounded so a large location can't time out the worker.
     const SP_TAG_RE = /s&p-|scale-profit/i;
+    const SP_SOURCE_RE = /s&p|scale.?profit/i;
     try {
       for (let page = 1; page <= 30; page++) {
         const res = (await ghlFetch("/contacts/search", {
@@ -1180,7 +1174,8 @@ export const listSeminarPurchasers = createServerFn({ method: "POST" })
         const batch = res.contacts ?? [];
         for (const c of batch) {
           const tags = (c.tags ?? []).map((t) => String(t));
-          if (!tags.some((t) => SP_TAG_RE.test(t))) continue;
+          const isSp = tags.some((t) => SP_TAG_RE.test(t)) || SP_SOURCE_RE.test(c.source ?? "");
+          if (!isSp) continue;
           const id = String(c.id ?? c.contactId ?? "");
           if (id) byId.set(id, c);
         }
@@ -1308,4 +1303,36 @@ export const getPurchaserDetail = createServerFn({ method: "POST" })
       },
       customFields: fields.filter((x) => x.value),
     };
+  });
+
+const assignSchema = z.object({
+  password: z.string().min(1).max(200),
+  contactIds: z.array(z.string().min(1).max(100)).min(1).max(200),
+  city: z.string().min(1).max(50),
+  // ISO end date (YYYY-MM-DD); falls back to the slug's seeded date if omitted.
+  endDate: z.string().max(20).optional(),
+});
+
+// Bulk-assign contacts to an event by adding the single centralized event tag
+// (🤝 s&p-{city}-{yymmdd}). Used by the admin to move "Unassigned" purchasers
+// into a city. Adds the tag without removing existing tags.
+export const assignContactsToEvent = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) => assignSchema.parse(d))
+  .handler(async ({ data }) => {
+    assertAdmin(data.password);
+    const tags = [eventTag(data.city, data.endDate)];
+    const results = await mapWithConcurrency(data.contactIds, 6, async (id) => {
+      try {
+        await ghlFetch(`/contacts/${id}/tags`, {
+          method: "POST",
+          body: JSON.stringify({ tags }),
+        });
+        return true;
+      } catch (err) {
+        console.warn(`GHL tag-assign failed for ${id}:`, (err as Error).message);
+        return false;
+      }
+    });
+    const assigned = results.filter(Boolean).length;
+    return { ok: assigned === data.contactIds.length, assigned, failed: data.contactIds.length - assigned };
   });
