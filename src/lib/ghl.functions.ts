@@ -1395,47 +1395,46 @@ export const tagBuyerForEvent = createServerFn({ method: "POST" })
 // are capped; everything else is unlimited.
 export const VIP_LIMITS: Record<string, number> = { nashville: 20 };
 
-// A purchaser is VIP if they came through the S&P-vip checkout form — i.e. their
-// contact source mentions "vip". (Tier fallback for older opportunity-derived data.)
-export function isVipBuyer(source: string, tier = ""): boolean {
-  return /vip/i.test(source) || /vip/i.test(tier);
-}
+// Per-event GHL location *custom value* that holds the REMAINING VIP tickets.
+// A GHL workflow decrements it on each VIP purchase, so it's the source of truth
+// (no contact scanning / tier guessing needed). Nashville only for now.
+const VIP_REMAINING_VALUE_KEYS: Record<string, string> = {
+  nashville: "sp_nashville_vip_ticket_remaining",
+};
 
-// Count VIP buyers for an event by scanning contacts (the emoji tag isn't
-// searchable, so we match in code): event tag for {city} + VIP source, excluding
-// attendees. Cached briefly so checkout/landing loads don't rescan every time.
-let vipCountCache: { at: number; data: Record<string, number> } | null = null;
-const VIP_COUNT_TTL_MS = 60 * 1000;
+// Read the remaining-VIP custom value for an event. Returns null if the city has
+// no configured value or it can't be read. Cached briefly (checkout/landing hit
+// this on load).
+let vipRemainingCache: { at: number; data: Record<string, number> } | null = null;
+const VIP_REMAINING_TTL_MS = 60 * 1000;
 
-async function countEventVipSold(city: string): Promise<number> {
+async function readVipRemaining(city: string): Promise<number | null> {
   const slug = city.toLowerCase();
-  if (vipCountCache && Date.now() - vipCountCache.at < VIP_COUNT_TTL_MS && slug in vipCountCache.data) {
-    return vipCountCache.data[slug];
+  const key = VIP_REMAINING_VALUE_KEYS[slug];
+  if (!key) return null;
+  if (vipRemainingCache && Date.now() - vipRemainingCache.at < VIP_REMAINING_TTL_MS && slug in vipRemainingCache.data) {
+    return vipRemainingCache.data[slug];
   }
-  let count = 0;
-  const pageLimit = 100;
   try {
-    for (let page = 1; page <= 30; page++) {
-      const res = (await ghlFetch("/contacts/search", {
-        method: "POST",
-        body: JSON.stringify({ locationId: GHL_LOCATION_ID, page, pageLimit, filters: [] }),
-      })) as { contacts?: RawSearchContact[] };
-      const batch = res.contacts ?? [];
-      for (const c of batch) {
-        const src = c.source ?? "";
-        if (/attendee/i.test(src)) continue; // attendees aren't buyers
-        const tags = (c.tags ?? []).map((t) => String(t));
-        if (deriveEventSlug(tags) !== slug) continue; // not this event
-        if (!isVipBuyer(src, deriveTier(tags, c.opportunities))) continue;
-        count++;
-      }
-      if (batch.length < pageLimit) break;
-    }
+    const res = (await ghlFetch(`/locations/${GHL_LOCATION_ID}/customValues`, {
+      method: "GET",
+    })) as {
+      customValues?: Array<{ name?: string; fieldKey?: string; value?: string }>;
+    };
+    const target = (res.customValues ?? []).find((v) => {
+      const k = `${v.fieldKey ?? ""} ${v.name ?? ""}`.toLowerCase().replace(/[^a-z0-9]+/g, "_");
+      return k.includes(key.toLowerCase());
+    });
+    if (!target) return null;
+    const m = String(target.value ?? "").match(/-?\d+/);
+    if (!m) return null;
+    const remaining = Number(m[0]);
+    vipRemainingCache = { at: Date.now(), data: { ...(vipRemainingCache?.data ?? {}), [slug]: remaining } };
+    return remaining;
   } catch (err) {
-    console.warn("GHL VIP count scan failed:", (err as Error).message);
+    console.warn("GHL VIP custom-value fetch failed:", (err as Error).message);
+    return null;
   }
-  vipCountCache = { at: Date.now(), data: { ...(vipCountCache?.data ?? {}), [slug]: count } };
-  return count;
 }
 
 export type VipAvailability = {
@@ -1448,14 +1447,19 @@ export type VipAvailability = {
 
 const vipAvailInputSchema = z.object({ city: z.string().min(1).max(50) });
 
-// Public: how many VIP tickets are left for an event. Used by checkout + landing
-// to disable VIP once the cap is reached, and by the admin to show availability.
+// Public: how many VIP tickets are left for an event, from the GHL custom value
+// {{custom_values.sp_nashville_vip_ticket_remaining}}. Used by checkout + landing
+// to disable VIP once it hits 0, and by the admin to show availability.
 export const getVipAvailability = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => vipAvailInputSchema.parse(d))
   .handler(async ({ data }): Promise<VipAvailability> => {
     const limit = VIP_LIMITS[data.city.toLowerCase()] ?? 0;
     if (!limit) return { limited: false, limit: 0, sold: 0, remaining: 0, soldOut: false };
-    const sold = await countEventVipSold(data.city);
-    const remaining = Math.max(limit - sold, 0);
-    return { limited: true, limit, sold, remaining, soldOut: remaining <= 0 };
+    const remaining = await readVipRemaining(data.city);
+    // If the custom value can't be read, don't block sales — treat as available.
+    if (remaining === null) {
+      return { limited: true, limit, sold: 0, remaining: limit, soldOut: false };
+    }
+    const rem = Math.max(remaining, 0);
+    return { limited: true, limit, sold: Math.max(limit - rem, 0), remaining: rem, soldOut: rem <= 0 };
   });

@@ -39,10 +39,11 @@ import {
   getPurchaserDetail,
   addAttendeesToGhl,
   assignContactsToEvent,
-  isVipBuyer,
+  getVipAvailability,
   VIP_LIMITS,
   type SeminarPurchaser,
   type PurchaserDetail,
+  type VipAvailability,
 } from "@/lib/ghl.functions";
 import { getTodayISO, splitEvents, type EventRow } from "@/lib/events";
 import { loadStoredEvents, saveStoredEvents } from "@/lib/events.store";
@@ -581,6 +582,18 @@ function PurchasesView({
   const [assigning, setAssigning] = useState(false);
   const [assignMsg, setAssignMsg] = useState<string | null>(null);
 
+  // VIP availability (from the GHL custom value) for capped events, e.g. Nashville.
+  const vipAvailFn = useServerFn(getVipAvailability);
+  const [vipBySlug, setVipBySlug] = useState<Record<string, VipAvailability>>({});
+  useEffect(() => {
+    for (const slug of Object.keys(VIP_LIMITS)) {
+      if (vipBySlug[slug]) continue;
+      vipAvailFn({ data: { city: slug } })
+        .then((a) => setVipBySlug((m) => ({ ...m, [slug]: a })))
+        .catch(() => {});
+    }
+  }, [vipAvailFn, vipBySlug]);
+
   const toggleSelected = (id: string) =>
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -717,19 +730,18 @@ function PurchasesView({
             </div>
 
             {VIP_LIMITS[group.slug] != null &&
+              vipBySlug[group.slug] &&
               (() => {
-                const limit = VIP_LIMITS[group.slug];
-                const vipSold = group.buyers.filter((b) => isVipBuyer(b.source, b.tier)).length;
-                const left = Math.max(limit - vipSold, 0);
+                const v = vipBySlug[group.slug];
                 return (
                   <div className="mb-3 flex items-center gap-2 rounded-lg border border-primary/40 bg-primary/5 p-3 text-sm">
                     <Ticket className="h-4 w-4 text-primary" />
                     <span className="font-semibold">VIP tickets:</span>
                     <span>
-                      {vipSold} / {limit} sold
+                      {v.sold} / {v.limit} sold
                     </span>
-                    <span className={left > 0 ? "text-primary" : "text-destructive"}>
-                      · {left > 0 ? `${left} available` : "Sold out"}
+                    <span className={v.remaining > 0 ? "text-primary" : "text-destructive"}>
+                      · {v.remaining > 0 ? `${v.remaining} available` : "Sold out"}
                     </span>
                   </div>
                 );
