@@ -147,9 +147,15 @@ export const submitCheckoutToGhl = createServerFn({ method: "POST" })
       { key: FIELD_KEYS.ticketQuantity, field_value: String(data.quantity) },
       { key: FIELD_KEYS.ticketQuantityLegacy, field_value: String(data.quantity) },
     ];
-    // Single event tag for the buyer. Tier is captured on the product /
-    // ticket_tier custom field + opportunity, not in a tag.
-    const tags = [eventTag(data.city)];
+    // Tags: the 🤝 s&p-{city}-{yymmdd} tag for GHL grouping, PLUS a searchable
+    // umbrella tag and a clean per-event tag. The emoji tag alone isn't reliably
+    // searchable/parseable (GHL normalizes it), so these two keep the admin
+    // dashboard able to find and correctly group every purchaser.
+    const tags = [
+      eventTag(data.city),
+      "scale-profit-seminar",
+      `scale-profit-${data.city}`,
+    ];
 
     // 1. Upsert primary buyer contact + fetch pipelines in parallel
     //    (pipelines lookup doesn't depend on the contact, so we save a
@@ -818,10 +824,14 @@ const addAttendeesSchema = z.object({
 export const addAttendeesToGhl = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => addAttendeesSchema.parse(d))
   .handler(async ({ data }) => {
-    // Single event tag (🤝 s&p-{city}-{yymmdd}) — same tag the buyer carries, so
-    // attendees group under the same event. Buyer-vs-attendee is told apart by
-    // the contact `source`, not a tag.
-    const tags = [eventTag(data.city, data.endDate)];
+    // Same searchable/groupable tags the buyer carries, plus the attendee marker
+    // so the admin can tell attendees apart and still find/group them by event.
+    const tags = [
+      eventTag(data.city, data.endDate),
+      "scale-profit-seminar",
+      `scale-profit-${data.city}`,
+      "scale-profit-attendee",
+    ];
     const results = await Promise.allSettled(
       data.attendees
         .filter((a) => a.email)
