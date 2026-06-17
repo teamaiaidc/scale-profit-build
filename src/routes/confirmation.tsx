@@ -8,6 +8,7 @@ import logo from "@/assets/hero-banner.webp";
 type Search = {
   city?: string;
   tier?: string;
+  firstName?: string;
 };
 
 const isMergeTag = (value?: string) => !value || /{{|}}/.test(value);
@@ -22,6 +23,7 @@ export const Route = createFileRoute("/confirmation")({
       normalizeCity(s.city) ??
       "boston",
     tier: s.tier === "vip" ? "vip" : "ga",
+    firstName: clean(s.firstName) ?? clean(s.first_name),
   }),
   head: () => ({
     meta: [{ title: "Purchase Confirmed — Scale & Profit Seminar" }],
@@ -30,7 +32,7 @@ export const Route = createFileRoute("/confirmation")({
 });
 
 function ConfirmationPage() {
-  const { tier } = Route.useSearch();
+  const { tier, firstName } = Route.useSearch();
   const isVip = tier === "vip";
 
   return (
@@ -47,7 +49,9 @@ function ConfirmationPage() {
         <div className="flex flex-col items-center text-center">
           <CheckCircle2 className="h-16 w-16 text-primary" />
           <h1 className="mt-6 text-4xl font-black md:text-5xl">
-            Congratulations — Your Purchase Is Confirmed!
+            {firstName?.trim()
+              ? `Congratulations, ${firstName.trim()}! Your Purchase Is Confirmed!`
+              : "Congratulations — Your Purchase Is Confirmed!"}
           </h1>
           {isVip ? (
             <p className="mt-6 text-muted-foreground">
