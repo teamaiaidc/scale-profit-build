@@ -147,10 +147,11 @@ export const submitCheckoutToGhl = createServerFn({ method: "POST" })
       { key: FIELD_KEYS.ticketQuantity, field_value: String(data.quantity) },
       { key: FIELD_KEYS.ticketQuantityLegacy, field_value: String(data.quantity) },
     ];
-    // One centralized tag: 🤝 s&p-{city}-{yymmdd}. The admin dashboard finds
-    // purchasers by scanning contacts (matching this tag in code) + the checkout
-    // form source, so no extra discovery tags are needed.
-    const tags = [eventTag(data.city)];
+    // Tagging is intentionally NOT done here — a GHL workflow applies the
+    // 🤝 s&p-{city}-{yymmdd} tag on purchase (it reads event_city / event_tag
+    // passed into the form). We omit `tags` from the upsert so we never touch
+    // or overwrite the workflow's tags. We still record event_city as a custom
+    // field so the workflow / admin always know which event this was.
 
     // 1. Upsert primary buyer contact + fetch pipelines in parallel
     //    (pipelines lookup doesn't depend on the contact, so we save a
@@ -163,7 +164,6 @@ export const submitCheckoutToGhl = createServerFn({ method: "POST" })
         lastName: data.lastName,
         email: data.email,
         phone: data.phone,
-        tags,
         source: "Scale & Profit Seminar Checkout",
         // Agency state maps to GHL's native contact "State" field
         // ({{contact.state}}), so it's a top-level property, not a custom field.

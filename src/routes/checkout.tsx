@@ -14,7 +14,7 @@ import {
 } from "@/lib/ghl.functions";
 import { listEvents } from "@/lib/events.functions";
 import { loadStoredEvents } from "@/lib/events.store";
-import type { EventRow } from "@/lib/events";
+import { getTodayISO, splitEvents, type EventRow } from "@/lib/events";
 import { normalizeCity } from "@/lib/city";
 import logo from "@/assets/hero-banner.webp";
 
@@ -22,7 +22,7 @@ type Search = { city?: string; tier?: string; email?: string };
 
 export const Route = createFileRoute("/checkout")({
   validateSearch: (s: Record<string, unknown>): Search => ({
-    city: normalizeCity(s.city) ?? "boston",
+    city: normalizeCity(s.city),
     tier: typeof s.tier === "string" ? s.tier : "ga",
     email: typeof s.email === "string" ? s.email : undefined,
   }),
@@ -180,7 +180,25 @@ function CheckoutPage() {
     }
     return map;
   }, [events]);
-  const cityInfo = cities[city ?? "boston"] ?? cities.boston ?? CITIES.boston;
+
+  // The event/city is whatever the buyer clicked (URL ?city=). Only when it's
+  // missing/unknown do we fall back to the first UPCOMING event — never a
+  // hardcoded "boston".
+  const resolvedCity = useMemo(() => {
+    if (city && events.some((e) => e.slug === city)) return city;
+    const upcoming = splitEvents(events, getTodayISO()).upcoming;
+    return upcoming[0]?.slug ?? events[0]?.slug ?? city ?? "";
+  }, [city, events]);
+
+  // yymmdd from the event's end date, plus the full tag value, so a GHL workflow
+  // can read them off the form and tag the buyer 🤝 s&p-{city}-{yymmdd}.
+  const eventYymmdd = (events.find((e) => e.slug === resolvedCity)?.end_date ?? "").replace(
+    /^\d{2}(\d{2})-(\d{2})-(\d{2})$/,
+    "$1$2$3",
+  );
+  const eventTagValue = eventYymmdd ? `🤝 s&p-${resolvedCity}-${eventYymmdd}` : `🤝 s&p-${resolvedCity}`;
+
+  const cityInfo = cities[resolvedCity] ?? cities.boston ?? CITIES.boston;
   const isVip = tier === "vip";
 
   // Step 2 embedded GHL payment form (per tier).
@@ -226,9 +244,12 @@ function CheckoutPage() {
   const paymentSrc = useMemo(() => {
     const u = new URL(paymentFormUrl);
     const params: Record<string, string> = {
-      event_city: city ?? "boston",
+      event_city: resolvedCity,
       event_name: cityInfo.name,
       event_date: cityInfo.date,
+      // For the GHL tagging workflow: the date as yymmdd and the full tag value.
+      event_yymmdd: eventYymmdd,
+      event_tag: eventTagValue,
       ticket_tier: isVip ? "VIP" : "General Admission",
       // Survey answers passed through so GHL captures them on submit (requires
       // matching hidden fields in the GHL form). The survey is also attached to
@@ -242,7 +263,17 @@ function CheckoutPage() {
     };
     for (const [k, v] of Object.entries(params)) if (v) u.searchParams.set(k, v);
     return u.toString();
-  }, [paymentFormUrl, city, cityInfo.name, cityInfo.date, isVip, survey, emailFromUrl]);
+  }, [
+    paymentFormUrl,
+    resolvedCity,
+    cityInfo.name,
+    cityInfo.date,
+    eventYymmdd,
+    eventTagValue,
+    isVip,
+    survey,
+    emailFromUrl,
+  ]);
 
   // When the embedded GHL payment form reports a successful submission, take
   // the buyer straight to our confirmation/loop page instead of GHL's default
@@ -310,7 +341,7 @@ function CheckoutPage() {
               lastName,
               email: buyerEmail,
               phone: "",
-              city: city ?? "boston",
+              city: resolvedCity,
               tier: isVip ? "vip" : "ga",
               quantity: isVip ? 1 : qty,
               amount: total,
@@ -320,7 +351,7 @@ function CheckoutPage() {
                 date: cityInfo.date,
                 venue: cityInfo.venue,
                 address: cityInfo.address,
-                time: events.find((ev: EventRow) => ev.slug === (city ?? "boston"))?.time,
+                time: events.find((ev: EventRow) => ev.slug === resolvedCity)?.time,
               },
             },
           }).catch((err) => console.warn("GHL survey attach failed:", err));
@@ -329,7 +360,7 @@ function CheckoutPage() {
         navigate({
           to: "/confirmation",
           search: {
-            city: city ?? "boston",
+            city: resolvedCity,
             tier: isVip ? "vip" : "ga",
             qty,
             email: buyerEmail || undefined,
@@ -343,7 +374,7 @@ function CheckoutPage() {
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [step, navigate, city, isVip, gaOptions, survey, total, cityInfo, events, submitToGhl]);
+  }, [step, navigate, resolvedCity, isVip, gaOptions, survey, total, cityInfo, events, submitToGhl]);
 
   // Questions → Payment: validate the survey, then reveal the GHL payment form
   // (which collects name, email, phone, card and quantity in one place).
