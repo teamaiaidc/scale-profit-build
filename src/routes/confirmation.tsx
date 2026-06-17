@@ -1,14 +1,18 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { useServerFn } from "@tanstack/react-start";
+import { useEffect, useState } from "react";
 import { CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { normalizeCity } from "@/lib/city";
+import { lookupGhlContactByEmail } from "@/lib/ghl.functions";
 import logo from "@/assets/hero-banner.webp";
 
 type Search = {
   city?: string;
   tier?: string;
   firstName?: string;
+  email?: string;
 };
 
 const isMergeTag = (value?: string) => !value || /{{|}}/.test(value);
@@ -23,7 +27,8 @@ export const Route = createFileRoute("/confirmation")({
       normalizeCity(s.city) ??
       "boston",
     tier: s.tier === "vip" ? "vip" : "ga",
-    firstName: clean(s.firstName) ?? clean(s.first_name),
+    firstName: clean(s.firstName) ?? clean(s.first_name) ?? clean(s.fname),
+    email: clean(s.email) ?? clean(s.contact_email),
   }),
   head: () => ({
     meta: [{ title: "Purchase Confirmed — Scale & Profit Seminar" }],
@@ -32,8 +37,23 @@ export const Route = createFileRoute("/confirmation")({
 });
 
 function ConfirmationPage() {
-  const { tier, firstName } = Route.useSearch();
+  const { tier, firstName, email } = Route.useSearch();
   const isVip = tier === "vip";
+
+  // Greet the buyer by name. The name may arrive in the URL; if not but we have
+  // their email, look it up from GHL so the greeting still personalizes.
+  const lookupGhl = useServerFn(lookupGhlContactByEmail);
+  const [name, setName] = useState(firstName ?? "");
+  useEffect(() => {
+    if (firstName || !email) return;
+    lookupGhl({ data: { email } })
+      .then((res) => {
+        if (res.contact?.firstName) setName(res.contact.firstName);
+      })
+      .catch(() => {
+        /* leave the generic greeting */
+      });
+  }, [firstName, email, lookupGhl]);
 
   return (
     <div className="min-h-screen bg-background text-foreground">
