@@ -1167,6 +1167,29 @@ export const listSeminarPurchasers = createServerFn({ method: "POST" })
       }
     }
 
+    // GHL's tag-search can't reliably match the 🤝 emoji tag, so also page through
+    // contacts and keep any carrying an S&P tag (matched here in code, where the
+    // emoji is a non-issue). Bounded so a large location can't time out the worker.
+    const SP_TAG_RE = /s&p-|scale-profit/i;
+    try {
+      for (let page = 1; page <= 30; page++) {
+        const res = (await ghlFetch("/contacts/search", {
+          method: "POST",
+          body: JSON.stringify({ locationId: GHL_LOCATION_ID, page, pageLimit }),
+        })) as { contacts?: RawSearchContact[] };
+        const batch = res.contacts ?? [];
+        for (const c of batch) {
+          const tags = (c.tags ?? []).map((t) => String(t));
+          if (!tags.some((t) => SP_TAG_RE.test(t))) continue;
+          const id = String(c.id ?? c.contactId ?? "");
+          if (id) byId.set(id, c);
+        }
+        if (batch.length < pageLimit) break;
+      }
+    } catch (err) {
+      console.warn("GHL broad contact scan failed:", (err as Error).message);
+    }
+
     const rawContacts = [...byId.values()];
 
     // Base row built from the search result alone — no extra GHL calls, so these
