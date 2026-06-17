@@ -1112,20 +1112,15 @@ export const listSeminarPurchasers = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     assertAdmin(data.password);
 
-    // Find every S&P purchaser by tag. Query several tag forms per event so a
-    // contact is found however it was tagged — the umbrella tag, the clean
-    // per-city tag, and the 🤝 event tag both with and without the emoji (GHL
-    // may normalize/strip the emoji on storage). Deduped by contact id.
+    // Fast path: query legacy / ASCII tags only. NEVER send the 🤝 emoji tag as a
+    // search value — GHL's search 400s on it ("Error occurred while searching").
+    // The 🤝-tagged contacts are caught by the contact scan below instead.
     const searchTags = [
-      SEMINAR_TAG, // scale-profit-seminar (umbrella on buyers + attendees)
-      ...DEFAULT_EVENTS.flatMap((e) => {
-        const withEmoji = eventTag(e.slug, e.end_date);
-        return [
-          withEmoji, // 🤝 s&p-{city}-{yymmdd}
-          withEmoji.replace(/^🤝\s*/, ""), // s&p-{city}-{yymmdd}
-          `scale-profit-${e.slug}`, // clean per-city tag
-        ];
-      }),
+      SEMINAR_TAG, // scale-profit-seminar (legacy umbrella)
+      ...DEFAULT_EVENTS.flatMap((e) => [
+        eventTag(e.slug, e.end_date).replace(/^🤝\s*/, ""), // s&p-{city}-{yymmdd}
+        `scale-profit-${e.slug}`, // legacy per-city tag
+      ]),
     ];
     const byId = new Map<string, RawSearchContact>();
     let searchError: string | null = null;
@@ -1169,7 +1164,8 @@ export const listSeminarPurchasers = createServerFn({ method: "POST" })
       for (let page = 1; page <= 30; page++) {
         const res = (await ghlFetch("/contacts/search", {
           method: "POST",
-          body: JSON.stringify({ locationId: GHL_LOCATION_ID, page, pageLimit }),
+          // filters: [] returns the whole location (GHL 400s if the key is absent).
+          body: JSON.stringify({ locationId: GHL_LOCATION_ID, page, pageLimit, filters: [] }),
         })) as { contacts?: RawSearchContact[] };
         const batch = res.contacts ?? [];
         for (const c of batch) {
