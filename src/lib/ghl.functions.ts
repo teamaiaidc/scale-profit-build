@@ -43,6 +43,10 @@ const FIELD_KEYS = {
   hasMoa: "do_you_have_a_moa_1",
   attendedBefore: "have_you_attended_a_scale__profit_seminar_before_1",
   shirtSize: "scale__profit_shirt_size",
+  // Running count of additional attendees the admin has registered for a buyer,
+  // so "tickets to add remaining" persists across reloads. (Create this contact
+  // custom field in GHL — number — for persistence; absent → treated as 0.)
+  attendeesAdded: "sp_attendees_added",
 } as const;
 
 // GHL *opportunity* custom-field keys (separate object/namespace from contact
@@ -806,6 +810,9 @@ const addAttendeesSchema = z.object({
   // ISO end date (YYYY-MM-DD); falls back to the slug's default if omitted.
   endDate: z.string().max(20).optional(),
   attendees: z.array(attendeeSchema).min(1).max(20),
+  // The buyer these attendees belong to — so we can persist a running
+  // "attendees added" count on the buyer for the admin's remaining counter.
+  buyerContactId: z.string().max(100).optional(),
 });
 
 export const addAttendeesToGhl = createServerFn({ method: "POST" })
@@ -834,6 +841,25 @@ export const addAttendeesToGhl = createServerFn({ method: "POST" })
     );
     const saved = results.filter((r) => r.status === "fulfilled").length;
     const failed = results.length - saved;
+
+    // Persist the running added-count on the buyer so the "remaining" counter
+    // survives reloads. Best-effort: skipped silently if the field/contact is
+    // missing. (Requires the sp_attendees_added contact field to exist in GHL.)
+    if (data.buyerContactId && saved > 0) {
+      try {
+        const { attendeesAdded } = await resolveBuyerCounts(data.buyerContactId);
+        await ghlFetch(`/contacts/${data.buyerContactId}`, {
+          method: "PUT",
+          body: JSON.stringify({
+            customFields: [
+              { key: FIELD_KEYS.attendeesAdded, field_value: String(attendeesAdded + saved) },
+            ],
+          }),
+        });
+      } catch (err) {
+        console.warn("GHL attendees-added increment failed:", (err as Error).message);
+      }
+    }
     return { ok: failed === 0, saved, failed };
   });
 
@@ -867,6 +893,7 @@ export type SeminarPurchaser = {
   eventSlug: string; // best-effort event identifier (city slug) or "" if unknown
   tier: string; // "VIP" | "General Admission" | ""
   ticketQuantity: number;
+  attendeesAdded: number; // additional attendees already registered for this buyer
   amount: number;
   source: string;
   isAttendee: boolean;
@@ -878,6 +905,7 @@ export type SeminarPurchaser = {
 export type PurchaserDetail = {
   // Real ticket count if the payment form has populated the field; else 0.
   ticketQuantity: number;
+  attendeesAdded: number; // additional attendees already registered for this buyer
   answers: {
     agencyState: string;
     hasMoa: string;
@@ -1017,14 +1045,17 @@ async function fetchOpportunityTicketCount(contactId: string, email = ""): Promi
   }
 }
 
-// Single source of truth for "how many tickets did this buyer purchase", used by
-// BOTH the Attendees table and the detail dialog so their numbers always match.
-// Prefers the contact custom field (set by the GHL workflow), then falls back to
-// the opportunity / payment count. The contacts/search endpoint doesn't return
-// custom field values, so this does a per-contact GET.
-async function resolveTicketQuantity(contactId: string, email = ""): Promise<number> {
-  if (!contactId) return 0;
+// Single source of truth for a buyer's counts — tickets purchased AND how many
+// additional attendees have already been registered — used by BOTH the Attendees
+// table and the detail dialog so their numbers always match. The contacts/search
+// endpoint doesn't return custom field values, so this does one per-contact GET.
+async function resolveBuyerCounts(
+  contactId: string,
+  email = "",
+): Promise<{ ticketQuantity: number; attendeesAdded: number }> {
+  if (!contactId) return { ticketQuantity: 0, attendeesAdded: 0 };
   let contactQty = 0;
+  let attendeesAdded = 0;
   try {
     const fieldMeta = await getFieldMeta();
     const res = (await ghlFetch(`/contacts/${contactId}`, { method: "GET" })) as {
@@ -1048,14 +1079,21 @@ async function resolveTicketQuantity(contactId: string, email = ""): Promise<num
         valueOf(FIELD_KEYS.ticketQuantityLegacy3),
       10,
     );
+    attendeesAdded = Number.parseInt(valueOf(FIELD_KEYS.attendeesAdded), 10);
   } catch (err) {
-    console.warn("GHL contact ticket-count lookup failed:", (err as Error).message);
+    console.warn("GHL contact count lookup failed:", (err as Error).message);
   }
   // The contact field is authoritative (written for every tier at checkout); use
-  // it directly to avoid an extra opportunity+order lookup per buyer. Only fall
-  // back to the opportunity/order count for legacy contacts missing the field.
-  if (Number.isFinite(contactQty) && contactQty > 0) return contactQty;
-  return fetchOpportunityTicketCount(contactId, email);
+  // it directly to avoid an extra opportunity+order lookup. Only fall back to the
+  // opportunity/order count for legacy contacts missing the field.
+  const ticketQuantity =
+    Number.isFinite(contactQty) && contactQty > 0
+      ? contactQty
+      : await fetchOpportunityTicketCount(contactId, email);
+  return {
+    ticketQuantity,
+    attendeesAdded: Number.isFinite(attendeesAdded) && attendeesAdded > 0 ? attendeesAdded : 0,
+  };
 }
 
 function assertAdmin(password: string) {
@@ -1142,6 +1180,7 @@ export const listSeminarPurchasers = createServerFn({ method: "POST" })
         eventSlug: deriveEventSlug(tags),
         tier: deriveTier(tags, c.opportunities),
         ticketQuantity: 1,
+        attendeesAdded: 0,
         amount: oppAmount,
         source: c.source ?? "",
         isAttendee,
@@ -1149,22 +1188,23 @@ export const listSeminarPurchasers = createServerFn({ method: "POST" })
       };
     };
 
-    // Best-effort enrichment: real paid amount + ticket count per buyer. Any
-    // failure (or the whole step) falls back to the base rows so purchasers
-    // always show.
+    // Best-effort enrichment: real paid amount + ticket count + attendees-added
+    // per buyer. Any failure (or the whole step) falls back to the base rows so
+    // purchasers always show.
     let purchasers: SeminarPurchaser[];
     try {
       purchasers = await mapWithConcurrency(rawContacts, 6, async (c) => {
         const row = baseRow(c);
         if (row.isAttendee || !row.id) return row;
-        const [paid, tickets] = await Promise.all([
+        const [paid, counts] = await Promise.all([
           fetchPaymentAmount(row.id, row.email).catch(() => 0),
-          resolveTicketQuantity(row.id, row.email).catch(() => 0),
+          resolveBuyerCounts(row.id, row.email).catch(() => ({ ticketQuantity: 0, attendeesAdded: 0 })),
         ]);
         return {
           ...row,
           amount: paid > 0 ? paid : row.amount,
-          ticketQuantity: tickets > 0 ? tickets : row.ticketQuantity,
+          ticketQuantity: counts.ticketQuantity > 0 ? counts.ticketQuantity : row.ticketQuantity,
+          attendeesAdded: counts.attendeesAdded,
         };
       });
     } catch (err) {
@@ -1219,9 +1259,11 @@ export const getPurchaserDetail = createServerFn({ method: "POST" })
       10,
     );
     const oppTickets = await fetchOpportunityTicketCount(data.contactId, c.email ?? "");
+    const attendeesAdded = Number.parseInt(valueOf(FIELD_KEYS.attendeesAdded), 10);
 
     return {
       ticketQuantity: Number.isFinite(contactQty) && contactQty > 0 ? contactQty : oppTickets,
+      attendeesAdded: Number.isFinite(attendeesAdded) && attendeesAdded > 0 ? attendeesAdded : 0,
       answers: {
         // Agency state lives in the native contact State field.
         agencyState: c.state ?? "",

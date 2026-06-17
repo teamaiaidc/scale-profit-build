@@ -668,8 +668,9 @@ function PurchasesView({
                 <TableBody>
                   {group.rows.map((p) => {
                     const qty = p.ticketQuantity || 0;
-                    // Buyer = 1 seat, remaining = total - buyer.
-                    const remaining = !p.isAttendee && qty > 0 ? Math.max(qty - 1, 0) : 0;
+                    // Buyer = 1 seat; remaining = total − buyer − attendees already added.
+                    const remaining =
+                      !p.isAttendee && qty > 0 ? Math.max(qty - 1 - p.attendeesAdded, 0) : 0;
                     return (
                       <TableRow
                         key={p.id || p.email}
@@ -803,27 +804,33 @@ function PurchaserDialog({
         { label: "Shirt size", value: detail.answers.shirtSize },
       ].filter((r) => r.value)
     : [];
+  // Tickets purchased comes from {{contact.sp_no_of_ticket_purchased}} (resolved
+  // server-side). The buyer holds 1 seat; the rest are additional attendees to
+  // register. Each saved attendee this session decrements what's left to add.
   const ticketQty = detail && detail.ticketQuantity > 0 ? detail.ticketQuantity : null;
-  // Buyer counts as ticket 1 — additional attendees the admin needs to register.
   const additionalNeeded = ticketQty && ticketQty > 1 ? ticketQty - 1 : 0;
+  // Persisted count (from GHL) plus anything added in this open session.
+  const alreadyAdded = (detail?.attendeesAdded ?? 0) + saved;
+  const remaining = Math.max(additionalNeeded - alreadyAdded, 0);
 
-  // Auto-size attendee rows to match how many more guests need to be added.
+  // Auto-size attendee rows to match how many more guests still need to be added.
   useEffect(() => {
-    if (!p || p.isAttendee || additionalNeeded <= 0) return;
+    if (!p || p.isAttendee || remaining <= 0) return;
     setExtraAttendees((prev) => {
-      if (prev.length >= additionalNeeded) return prev;
+      if (prev.length >= remaining) return prev;
       const next = [...prev];
-      while (next.length < additionalNeeded) next.push({ ...emptyAttendee });
+      while (next.length < remaining) next.push({ ...emptyAttendee });
       return next;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [additionalNeeded, p?.id]);
+  }, [remaining, p?.id]);
 
   const setRow = (i: number, key: keyof NewAttendee, value: string) =>
     setExtraAttendees((prev) =>
       prev.map((a, idx) => (idx === i ? { ...a, [key]: value } : a)),
     );
-  const addRow = () => setExtraAttendees((prev) => [...prev, { ...emptyAttendee }]);
+  const addRow = () =>
+    setExtraAttendees((prev) => (prev.length >= remaining ? prev : [...prev, { ...emptyAttendee }]));
   const removeRow = (i: number) =>
     setExtraAttendees((prev) => (prev.length === 1 ? prev : prev.filter((_, idx) => idx !== i)));
 
@@ -848,9 +855,10 @@ function PurchaserDialog({
           city: p.eventSlug || "boston",
           tier: p.tier === "VIP" ? "vip" : "ga",
           attendees: cleaned,
+          buyerContactId: p.id || undefined,
         },
       });
-      setSaved(res.saved);
+      setSaved((prev) => prev + res.saved);
       if (res.failed > 0) setSaveError(`${res.failed} attendee(s) failed to save.`);
       setExtraAttendees([{ ...emptyAttendee }]);
     } catch (err) {
@@ -889,22 +897,26 @@ function PurchaserDialog({
                 </div>
                 <div className="rounded-lg border border-primary/40 bg-primary/5 p-3">
                   <p className="text-xs text-muted-foreground">Tickets to add remaining</p>
-                  <p className="text-xl font-bold text-primary">
-                    {loading ? "…" : additionalNeeded}
-                  </p>
+                  <p className="text-xl font-bold text-primary">{loading ? "…" : remaining}</p>
                 </div>
               </div>
 
-              {/* Add attendees */}
-              {!p.isAttendee && (
+              {/* Add attendees — only when there are extra seats still to register.
+                  Single-ticket buyers (and fully-registered ones) get no form. */}
+              {!p.isAttendee && !loading && remaining <= 0 && (
+                <p className="rounded-lg border border-border p-4 text-sm text-muted-foreground">
+                  {ticketQty && ticketQty > 1
+                    ? "All additional attendees have been added."
+                    : "Single ticket — no additional attendees to register."}
+                </p>
+              )}
+              {!p.isAttendee && remaining > 0 && (
                 <div className="rounded-lg border border-border p-4">
                   <div className="mb-2 flex items-center justify-between">
                     <p className="text-sm font-semibold">Add additional attendees</p>
-                    {ticketQty && ticketQty > 1 && (
-                      <p className="text-xs text-muted-foreground">
-                        {additionalNeeded} more attendee{additionalNeeded === 1 ? "" : "s"} needed
-                      </p>
-                    )}
+                    <p className="text-xs text-muted-foreground">
+                      {remaining} more attendee{remaining === 1 ? "" : "s"} needed
+                    </p>
                   </div>
                   <p className="mb-3 text-xs text-muted-foreground">
                     Register the buyer's extra ticket holders. Each attendee gets tagged into{" "}
@@ -947,7 +959,13 @@ function PurchaserDialog({
                     ))}
                   </div>
                   <div className="mt-3 flex flex-wrap items-center gap-2">
-                    <Button variant="outline" size="sm" onClick={addRow} type="button">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={addRow}
+                      type="button"
+                      disabled={extraAttendees.length >= remaining}
+                    >
                       <Plus className="mr-1.5 h-4 w-4" /> Add another
                     </Button>
                     <Button size="sm" onClick={handleAddAttendees} disabled={saving}>
