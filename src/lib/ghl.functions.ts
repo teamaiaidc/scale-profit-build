@@ -428,33 +428,6 @@ async function fetchPaymentAmount(contactId: string, email: string): Promise<num
   return 0;
 }
 
-// Recent paid orders → buyer contact ids. Orders are returned immediately by GHL
-// (unlike the contact tag-search, which lags while a brand-new contact is being
-// indexed), so this catches just-completed purchases the tag search would miss.
-// Defensive about the payload shape — returns [] on any mismatch/failure.
-async function fetchRecentOrderContactIds(): Promise<string[]> {
-  const ids = new Set<string>();
-  try {
-    for (let page = 0; page < 5; page++) {
-      const res = (await ghlFetch(
-        `/payments/orders?altId=${GHL_LOCATION_ID}&altType=location&limit=100&offset=${page * 100}`,
-        { method: "GET" },
-      )) as { data?: Array<Record<string, unknown>>; orders?: Array<Record<string, unknown>> };
-      const orders = res.data ?? res.orders ?? [];
-      if (orders.length === 0) break;
-      for (const o of orders) {
-        const snap = (o.contactSnapshot ?? o.contact ?? {}) as Record<string, unknown>;
-        const id = String(o.contactId ?? snap.id ?? snap._id ?? "");
-        if (id) ids.add(id);
-      }
-      if (orders.length < 100) break;
-    }
-  } catch (err) {
-    console.warn("GHL orders list failed:", (err as Error).message);
-  }
-  return [...ids];
-}
-
 // Bounded-concurrency map. Worker timeouts kill the whole listSeminarPurchasers
 // call when we fan out hundreds of GHL requests in parallel via Promise.all.
 async function mapWithConcurrency<T, R>(
@@ -1142,26 +1115,6 @@ export const listSeminarPurchasers = createServerFn({ method: "POST" })
         searchError = (err as Error).message;
         console.warn(`GHL purchaser search failed for tag "${tag}":`, searchError);
       }
-    }
-
-    // Catch any paid purchase the tag search hasn't indexed yet: pull recent
-    // orders and fetch (by id — no search lag) any buyer not already found.
-    try {
-      const orderContactIds = await fetchRecentOrderContactIds();
-      const missing = orderContactIds.filter((id) => !byId.has(id));
-      await mapWithConcurrency(missing, 6, async (id) => {
-        try {
-          const res = (await ghlFetch(`/contacts/${id}`, { method: "GET" })) as {
-            contact?: RawSearchContact & { id?: string };
-          };
-          if (res.contact) byId.set(id, { ...res.contact, id: res.contact.id ?? id });
-        } catch (err) {
-          console.warn(`GHL contact ${id} fetch failed:`, (err as Error).message);
-        }
-        return null;
-      });
-    } catch (err) {
-      console.warn("GHL order-based discovery failed:", (err as Error).message);
     }
 
     const rawContacts = [...byId.values()];
