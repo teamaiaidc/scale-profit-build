@@ -587,6 +587,17 @@ function PurchasesView({
       return next;
     });
 
+  // Select / deselect every contact in a group (the Unassigned "select all").
+  const toggleAll = (rows: SeminarPurchaser[]) => {
+    const ids = rows.map((r) => r.id).filter(Boolean);
+    setSelectedIds((prev) => {
+      const allSelected = ids.length > 0 && ids.every((id) => prev.has(id));
+      const next = new Set(prev);
+      ids.forEach((id) => (allSelected ? next.delete(id) : next.add(id)));
+      return next;
+    });
+  };
+
   const handleBulkAssign = async () => {
     if (!assignTo || selectedIds.size === 0) return;
     const ev = events.find((e) => e.slug === assignTo);
@@ -734,7 +745,20 @@ function PurchasesView({
               <Table>
                 <TableHeader>
                   <TableRow>
-                    {isUnassigned && <TableHead className="w-8" />}
+                    {isUnassigned && (
+                      <TableHead className="w-8">
+                        <input
+                          type="checkbox"
+                          className="accent-primary"
+                          aria-label="Select all"
+                          checked={
+                            group.rows.some((r) => r.id) &&
+                            group.rows.every((r) => !r.id || selectedIds.has(r.id))
+                          }
+                          onChange={() => toggleAll(group.rows)}
+                        />
+                      </TableHead>
+                    )}
                     <TableHead>Name</TableHead>
                     <TableHead>Email</TableHead>
                     <TableHead>Phone</TableHead>
