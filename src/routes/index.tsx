@@ -1,8 +1,10 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useRef, useState } from "react";
 import { Check, Calendar, MapPin, Clock, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { getVipAvailability, type VipAvailability } from "@/lib/ghl.functions";
 import { listEvents } from "@/lib/events.functions";
 import { getTodayISO, splitEvents, type EventRow } from "@/lib/events";
 import { loadStoredEvents } from "@/lib/events.store";
@@ -181,6 +183,18 @@ function Index() {
   // Show only upcoming events (soonest first); fall back to all if none are upcoming.
   const { upcoming } = splitEvents(allEvents, getTodayISO());
   const events = upcoming.length > 0 ? upcoming : allEvents;
+
+  // VIP availability (e.g. Nashville cap of 20) for the open event — to disable
+  // the VIP "Sign Up" button when it's sold out.
+  const vipAvailFn = useServerFn(getVipAvailability);
+  const [vipBySlug, setVipBySlug] = useState<Record<string, VipAvailability>>({});
+  const openSlug = openEvent !== null ? events[openEvent]?.slug : undefined;
+  useEffect(() => {
+    if (!openSlug || vipBySlug[openSlug]) return;
+    vipAvailFn({ data: { city: openSlug } })
+      .then((a) => setVipBySlug((m) => ({ ...m, [openSlug]: a })))
+      .catch(() => {});
+  }, [openSlug, vipBySlug, vipAvailFn]);
   const featured = events[0];
 
   return (
@@ -533,7 +547,11 @@ function Index() {
                   </p>
                 </div>
                 <div className="grid gap-6 md:grid-cols-2">
-                  {tiers.map((tier) => (
+                  {tiers.map((tier) => {
+                    const slug = events[openEvent]!.slug;
+                    const vip = vipBySlug[slug];
+                    const vipSoldOut = tier.featured && !!vip?.limited && vip.soldOut;
+                    return (
                     <Card
                       key={tier.name}
                       className={`flex h-full flex-col p-6 ${tier.featured ? "border-primary" : ""}`}
@@ -558,19 +576,26 @@ function Index() {
                           </li>
                         ))}
                       </ul>
-                      <Button asChild className="mt-6 w-full">
-                        <Link
-                          to="/checkout"
-                          search={{
-                            city: events[openEvent]!.slug,
-                            tier: tier.featured ? "vip" : "ga",
-                          }}
-                        >
-                          Sign Up Now!
-                        </Link>
-                      </Button>
+                      {vipSoldOut ? (
+                        <Button className="mt-6 w-full" variant="outline" disabled>
+                          VIP Sold Out
+                        </Button>
+                      ) : (
+                        <Button asChild className="mt-6 w-full">
+                          <Link
+                            to="/checkout"
+                            search={{
+                              city: events[openEvent]!.slug,
+                              tier: tier.featured ? "vip" : "ga",
+                            }}
+                          >
+                            Sign Up Now!
+                          </Link>
+                        </Button>
+                      )}
                     </Card>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}

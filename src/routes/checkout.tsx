@@ -9,8 +9,10 @@ import { Label } from "@/components/ui/label";
 import {
   listGhlProducts,
   submitCheckoutToGhl,
+  getVipAvailability,
   type GhlProduct,
   type GhlPrice,
+  type VipAvailability,
 } from "@/lib/ghl.functions";
 import { listEvents } from "@/lib/events.functions";
 import { loadStoredEvents } from "@/lib/events.store";
@@ -215,6 +217,18 @@ function CheckoutPage() {
 
   const navigate = useNavigate();
   const submitToGhl = useServerFn(submitCheckoutToGhl);
+
+  // VIP ticket cap (e.g. Nashville = 20). Block VIP checkout once it's sold out.
+  const vipAvailFn = useServerFn(getVipAvailability);
+  const [vipAvail, setVipAvail] = useState<VipAvailability | null>(null);
+  useEffect(() => {
+    if (!resolvedCity) return;
+    vipAvailFn({ data: { city: resolvedCity } })
+      .then(setVipAvail)
+      .catch(() => setVipAvail(null));
+  }, [resolvedCity, vipAvailFn]);
+  const vipSoldOut = isVip && !!vipAvail?.limited && vipAvail.soldOut;
+
   // Two-step checkout: (1) questions, (2) payment. Name, email, phone, card and
   // quantity are all collected once inside the embedded GHL payment form.
   const [step, setStep] = useState<1 | 2>(1);
@@ -555,21 +569,38 @@ function CheckoutPage() {
                         Back
                       </Button>
                     </div>
-                    <div className="overflow-hidden rounded-lg bg-white">
-                      <iframe
-                        src={paymentSrc}
-                        id={`inline-${paymentFormId}`}
-                        title="Secure Payment"
-                        data-layout='{"id":"INLINE"}'
-                        data-form-id={paymentFormId}
-                        data-layout-iframe-id={`inline-${paymentFormId}`}
-                        className="w-full"
-                        style={{ minHeight: 720, border: "none" }}
-                      />
-                    </div>
-                    <p className="flex items-center justify-center gap-2 text-center text-xs text-muted-foreground">
-                      <ShieldCheck className="h-4 w-4 text-primary" /> 100% Secure & Safe Payments
-                    </p>
+                    {vipSoldOut ? (
+                      <div className="rounded-lg border border-border bg-muted/20 p-6 text-center">
+                        <p className="text-lg font-bold">VIP is sold out for {cityInfo.name}</p>
+                        <p className="mt-2 text-sm text-muted-foreground">
+                          All VIP tickets for this event have been claimed. General Admission is
+                          still available.
+                        </p>
+                        <Button asChild className="mt-4" variant="outline">
+                          <Link to="/checkout" search={{ city: resolvedCity, tier: "ga" }}>
+                            Switch to General Admission
+                          </Link>
+                        </Button>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="overflow-hidden rounded-lg bg-white">
+                          <iframe
+                            src={paymentSrc}
+                            id={`inline-${paymentFormId}`}
+                            title="Secure Payment"
+                            data-layout='{"id":"INLINE"}'
+                            data-form-id={paymentFormId}
+                            data-layout-iframe-id={`inline-${paymentFormId}`}
+                            className="w-full"
+                            style={{ minHeight: 720, border: "none" }}
+                          />
+                        </div>
+                        <p className="flex items-center justify-center gap-2 text-center text-xs text-muted-foreground">
+                          <ShieldCheck className="h-4 w-4 text-primary" /> 100% Secure & Safe Payments
+                        </p>
+                      </>
+                    )}
                   </>
                 )}
               </form>

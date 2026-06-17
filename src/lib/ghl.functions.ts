@@ -162,7 +162,9 @@ export const submitCheckoutToGhl = createServerFn({ method: "POST" })
         lastName: data.lastName,
         email: data.email,
         phone: data.phone,
-        source: "Scale & Profit Seminar Checkout",
+        // Do NOT set `source` here — that would overwrite the checkout form's
+        // source (S&P-GenAd / S&P-vip), which we rely on to tell GA vs VIP apart
+        // (e.g. the Nashville VIP cap).
         // Agency state maps to GHL's native contact "State" field
         // ({{contact.state}}), so it's a top-level property, not a custom field.
         ...(data.survey?.agencyState ? { state: data.survey.agencyState } : {}),
@@ -1385,4 +1387,75 @@ export const tagBuyerForEvent = createServerFn({ method: "POST" })
       body: JSON.stringify({ tags: [tag] }),
     });
     return { ok: true, tag };
+  });
+
+// ============== VIP ticket caps ==============
+
+// Per-event VIP purchase limit (slug → max VIP tickets). Only events listed here
+// are capped; everything else is unlimited.
+export const VIP_LIMITS: Record<string, number> = { nashville: 20 };
+
+// A purchaser is VIP if they came through the S&P-vip checkout form — i.e. their
+// contact source mentions "vip". (Tier fallback for older opportunity-derived data.)
+export function isVipBuyer(source: string, tier = ""): boolean {
+  return /vip/i.test(source) || /vip/i.test(tier);
+}
+
+// Count VIP buyers for an event by scanning contacts (the emoji tag isn't
+// searchable, so we match in code): event tag for {city} + VIP source, excluding
+// attendees. Cached briefly so checkout/landing loads don't rescan every time.
+let vipCountCache: { at: number; data: Record<string, number> } | null = null;
+const VIP_COUNT_TTL_MS = 60 * 1000;
+
+async function countEventVipSold(city: string): Promise<number> {
+  const slug = city.toLowerCase();
+  if (vipCountCache && Date.now() - vipCountCache.at < VIP_COUNT_TTL_MS && slug in vipCountCache.data) {
+    return vipCountCache.data[slug];
+  }
+  let count = 0;
+  const pageLimit = 100;
+  try {
+    for (let page = 1; page <= 30; page++) {
+      const res = (await ghlFetch("/contacts/search", {
+        method: "POST",
+        body: JSON.stringify({ locationId: GHL_LOCATION_ID, page, pageLimit, filters: [] }),
+      })) as { contacts?: RawSearchContact[] };
+      const batch = res.contacts ?? [];
+      for (const c of batch) {
+        const src = c.source ?? "";
+        if (/attendee/i.test(src)) continue; // attendees aren't buyers
+        const tags = (c.tags ?? []).map((t) => String(t));
+        if (deriveEventSlug(tags) !== slug) continue; // not this event
+        if (!isVipBuyer(src, deriveTier(tags, c.opportunities))) continue;
+        count++;
+      }
+      if (batch.length < pageLimit) break;
+    }
+  } catch (err) {
+    console.warn("GHL VIP count scan failed:", (err as Error).message);
+  }
+  vipCountCache = { at: Date.now(), data: { ...(vipCountCache?.data ?? {}), [slug]: count } };
+  return count;
+}
+
+export type VipAvailability = {
+  limited: boolean;
+  limit: number;
+  sold: number;
+  remaining: number;
+  soldOut: boolean;
+};
+
+const vipAvailInputSchema = z.object({ city: z.string().min(1).max(50) });
+
+// Public: how many VIP tickets are left for an event. Used by checkout + landing
+// to disable VIP once the cap is reached, and by the admin to show availability.
+export const getVipAvailability = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) => vipAvailInputSchema.parse(d))
+  .handler(async ({ data }): Promise<VipAvailability> => {
+    const limit = VIP_LIMITS[data.city.toLowerCase()] ?? 0;
+    if (!limit) return { limited: false, limit: 0, sold: 0, remaining: 0, soldOut: false };
+    const sold = await countEventVipSold(data.city);
+    const remaining = Math.max(limit - sold, 0);
+    return { limited: true, limit, sold, remaining, soldOut: remaining <= 0 };
   });

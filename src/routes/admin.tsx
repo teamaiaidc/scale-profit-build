@@ -39,6 +39,8 @@ import {
   getPurchaserDetail,
   addAttendeesToGhl,
   assignContactsToEvent,
+  isVipBuyer,
+  VIP_LIMITS,
   type SeminarPurchaser,
   type PurchaserDetail,
 } from "@/lib/ghl.functions";
@@ -713,6 +715,25 @@ function PurchasesView({
                 {group.attendees.length} attendee{group.attendees.length === 1 ? "" : "s"} added
               </p>
             </div>
+
+            {VIP_LIMITS[group.slug] != null &&
+              (() => {
+                const limit = VIP_LIMITS[group.slug];
+                const vipSold = group.buyers.filter((b) => isVipBuyer(b.source, b.tier)).length;
+                const left = Math.max(limit - vipSold, 0);
+                return (
+                  <div className="mb-3 flex items-center gap-2 rounded-lg border border-primary/40 bg-primary/5 p-3 text-sm">
+                    <Ticket className="h-4 w-4 text-primary" />
+                    <span className="font-semibold">VIP tickets:</span>
+                    <span>
+                      {vipSold} / {limit} sold
+                    </span>
+                    <span className={left > 0 ? "text-primary" : "text-destructive"}>
+                      · {left > 0 ? `${left} available` : "Sold out"}
+                    </span>
+                  </div>
+                );
+              })()}
 
             {isUnassigned && (
               <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/20 p-3">
