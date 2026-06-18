@@ -523,12 +523,22 @@ type EventGroup = {
   attendees: SeminarPurchaser[];
 };
 
-function groupByEvent(purchasers: SeminarPurchaser[], events: EventRow[]): EventGroup[] {
+function groupByEvent(
+  purchasers: SeminarPurchaser[],
+  events: EventRow[],
+  recentCutoff?: string,
+): EventGroup[] {
   const nameBySlug = new Map(events.map((e) => [e.slug, e.city || e.slug]));
   const order = events.map((e) => e.slug);
   const buckets = new Map<string, SeminarPurchaser[]>();
   for (const p of purchasers) {
     const slug = p.eventSlug || "unknown";
+    // The "unknown" (Unassigned) bucket is for untagged buyers we can't place.
+    // Only keep ones bought for an active/upcoming event — i.e. added after the
+    // most recent past event ended — so stale past-event contacts don't show.
+    if (slug === "unknown" && recentCutoff && p.dateAdded && p.dateAdded < recentCutoff) {
+      continue;
+    }
     const list = buckets.get(slug) ?? [];
     list.push(p);
     buckets.set(slug, list);
@@ -652,7 +662,10 @@ function PurchasesView({
       p.tags.some((t) => t.toLowerCase().includes(q))
     );
   });
-  const groups = purchasers ? groupByEvent(filtered, events) : [];
+  // Most-recently-ended past event — used as the cutoff so the Unassigned group
+  // only shows buyers added since then (active/upcoming-event buyers).
+  const recentCutoff = splitEvents(events, getTodayISO()).past[0]?.end_date;
+  const groups = purchasers ? groupByEvent(filtered, events, recentCutoff) : [];
   const totalPeople = purchasers?.length ?? 0;
   const totalBuyers = (purchasers ?? []).filter((p) => !p.isAttendee).length;
   const totalAttendees = (purchasers ?? []).filter((p) => p.isAttendee).length;
