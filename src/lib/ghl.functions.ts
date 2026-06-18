@@ -1395,25 +1395,25 @@ export const tagBuyerForEvent = createServerFn({ method: "POST" })
 // are capped; everything else is unlimited.
 export const VIP_LIMITS: Record<string, number> = { nashville: 20 };
 
-// Per-event GHL location *custom value* that holds the REMAINING VIP tickets.
-// A GHL workflow decrements it on each VIP purchase, so it's the source of truth
-// (no contact scanning / tier guessing needed). Nashville only for now.
-const VIP_REMAINING_VALUE_KEYS: Record<string, string> = {
+// Per-event GHL location *custom value* that tracks VIP purchases. A GHL workflow
+// increments it on each VIP purchase, so despite the "remaining" name it actually
+// holds the SOLD count — the source of truth (no contact scanning). Nashville only.
+const VIP_SOLD_VALUE_KEYS: Record<string, string> = {
   nashville: "sp_nashville_vip_ticket_remaining",
 };
 
-// Read the remaining-VIP custom value for an event. Returns null if the city has
-// no configured value or it can't be read. Cached briefly (checkout/landing hit
-// this on load).
-let vipRemainingCache: { at: number; data: Record<string, number> } | null = null;
-const VIP_REMAINING_TTL_MS = 60 * 1000;
+// Read the VIP *sold* custom value for an event. Returns null if the city has no
+// configured value or it can't be read. Cached briefly (checkout/landing hit this
+// on load).
+let vipSoldCache: { at: number; data: Record<string, number> } | null = null;
+const VIP_SOLD_TTL_MS = 60 * 1000;
 
-async function readVipRemaining(city: string): Promise<number | null> {
+async function readVipSold(city: string): Promise<number | null> {
   const slug = city.toLowerCase();
-  const key = VIP_REMAINING_VALUE_KEYS[slug];
+  const key = VIP_SOLD_VALUE_KEYS[slug];
   if (!key) return null;
-  if (vipRemainingCache && Date.now() - vipRemainingCache.at < VIP_REMAINING_TTL_MS && slug in vipRemainingCache.data) {
-    return vipRemainingCache.data[slug];
+  if (vipSoldCache && Date.now() - vipSoldCache.at < VIP_SOLD_TTL_MS && slug in vipSoldCache.data) {
+    return vipSoldCache.data[slug];
   }
   try {
     const res = (await ghlFetch(`/locations/${GHL_LOCATION_ID}/customValues`, {
@@ -1428,9 +1428,9 @@ async function readVipRemaining(city: string): Promise<number | null> {
     if (!target) return null;
     const m = String(target.value ?? "").match(/-?\d+/);
     if (!m) return null;
-    const remaining = Number(m[0]);
-    vipRemainingCache = { at: Date.now(), data: { ...(vipRemainingCache?.data ?? {}), [slug]: remaining } };
-    return remaining;
+    const sold = Number(m[0]);
+    vipSoldCache = { at: Date.now(), data: { ...(vipSoldCache?.data ?? {}), [slug]: sold } };
+    return sold;
   } catch (err) {
     console.warn("GHL VIP custom-value fetch failed:", (err as Error).message);
     return null;
@@ -1455,11 +1455,12 @@ export const getVipAvailability = createServerFn({ method: "POST" })
   .handler(async ({ data }): Promise<VipAvailability> => {
     const limit = VIP_LIMITS[data.city.toLowerCase()] ?? 0;
     if (!limit) return { limited: false, limit: 0, sold: 0, remaining: 0, soldOut: false };
-    const remaining = await readVipRemaining(data.city);
+    const soldValue = await readVipSold(data.city);
     // If the custom value can't be read, don't block sales — treat as available.
-    if (remaining === null) {
+    if (soldValue === null) {
       return { limited: true, limit, sold: 0, remaining: limit, soldOut: false };
     }
-    const rem = Math.max(remaining, 0);
-    return { limited: true, limit, sold: Math.max(limit - rem, 0), remaining: rem, soldOut: rem <= 0 };
+    const sold = Math.min(Math.max(soldValue, 0), limit);
+    const remaining = Math.max(limit - sold, 0);
+    return { limited: true, limit, sold, remaining, soldOut: remaining <= 0 };
   });
