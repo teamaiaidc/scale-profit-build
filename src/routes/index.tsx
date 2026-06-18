@@ -545,11 +545,14 @@ function Index() {
                   {(() => {
                     const slug = events[openEvent]!.slug;
                     // Hide the VIP tier entirely for GA-only events (e.g. Nashville).
-                    const visibleTiers = tiers.filter((t) => !t.featured || isVipOffered(slug));
                     const avail = availBySlug[slug];
-                    return visibleTiers.map((tier) => {
+                    return tiers.map((tier) => {
                       const tierAvail = tier.featured ? avail?.vip : avail?.ga;
-                      const soldOut = !!tierAvail?.soldOut;
+                      // Sold out when the tier hit its cap, or when it's the VIP
+                      // tier on a GA-only event (e.g. Nashville). Either way the
+                      // card stays visible with a disabled SOLD OUT button.
+                      const soldOut =
+                        !!tierAvail?.soldOut || (tier.featured && !isVipOffered(slug));
                       return (
                         <Card
                           key={tier.name}
@@ -577,7 +580,7 @@ function Index() {
                           </ul>
                           {soldOut ? (
                             <Button className="mt-6 w-full" variant="outline" disabled>
-                              {tier.featured ? "VIP Sold Out" : "Sold Out"}
+                              SOLD OUT
                             </Button>
                           ) : (
                             <Button asChild className="mt-6 w-full">

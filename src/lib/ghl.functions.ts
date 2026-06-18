@@ -7,11 +7,12 @@ const GHL_BASE = "https://services.leadconnectorhq.com";
 const GHL_VERSION = "2021-07-28";
 
 // ===== The one tag =====
-// Every buyer + attendee carries a single tag identifying the event + date:
-//   🤝 s&p-{city}-{yymmdd}   e.g. "🤝 s&p-boston-260603"
-// No tier/seminar/attendee tags — tier comes from the purchased product, and
-// buyer-vs-attendee is told apart by the contact `source`. Event/date/year is
-// read back from this tag (and from the opportunity / admin dashboard).
+// Every buyer + attendee carries a single tag identifying the TIER + event + date:
+//   🤝 s&p-{tier}-{city}-{yymmdd}   e.g. "🤝 s&p-vip-nashville-260806"
+// Tier is "ga" | "vip", so per-tier counts can be read straight off the tag.
+// (Legacy contacts carry the pre-tier tag 🤝 s&p-{city}-{yymmdd}; all parsers
+// below still read those, falling back to the opportunity for tier.)
+// Buyer-vs-attendee is told apart by the contact `source`, not a tag.
 const EVENT_TAG_PREFIX = "🤝 s&p-";
 
 // "2026-06-03" → "260603"; "" if the date isn't a full ISO date.
@@ -20,11 +21,22 @@ function yymmdd(isoDate?: string): string {
   return m ? `${m[1]}${m[2]}${m[3]}` : "";
 }
 
-// Build the single event tag for a city slug. Falls back to the seeded events
-// list for the end date when the caller doesn't supply one.
-function eventTag(city: string, endDate?: string): string {
+// Build the single event tag for a buyer/attendee. Falls back to the seeded
+// events list for the end date when the caller doesn't supply one.
+function eventTag(tier: "ga" | "vip", city: string, endDate?: string): string {
   const date = yymmdd(endDate || DEFAULT_EVENTS.find((e) => e.slug === city)?.end_date);
-  return date ? `${EVENT_TAG_PREFIX}${city}-${date}` : `${EVENT_TAG_PREFIX}${city}`;
+  const base = `${EVENT_TAG_PREFIX}${tier}-${city}`;
+  return date ? `${base}-${date}` : base;
+}
+
+// The tier-agnostic substring shared by both the new tier-prefixed tag and the
+// legacy tag (e.g. "nashville-260806"), used as a GHL "contains" search value so
+// one query matches GA, VIP, and legacy tags alike. Precise event/tier filtering
+// then happens in deriveEventSlug / deriveTier. (NEVER search the 🤝 emoji — GHL
+// 400s on it.)
+function eventTagSearchFragment(city: string, endDate?: string): string {
+  const date = yymmdd(endDate || DEFAULT_EVENTS.find((e) => e.slug === city)?.end_date);
+  return date ? `${city}-${date}` : city;
 }
 
 // GHL custom-field keys the checkout writes to the buyer contact. These must
@@ -151,7 +163,7 @@ export const submitCheckoutToGhl = createServerFn({ method: "POST" })
     // confirmation page (reached via GHL's redirect) — so a buyer never gets two
     // tags. We omit `tags` from the buyer upsert. Additional attendees (below) do
     // carry the single event tag, same as addAttendeesToGhl.
-    const tags = [eventTag(data.city)];
+    const tags = [eventTag(data.tier, data.city)];
 
     // 1. Upsert primary buyer contact + fetch pipelines in parallel
     //    (pipelines lookup doesn't depend on the contact, so we save a
@@ -819,9 +831,9 @@ const addAttendeesSchema = z.object({
 export const addAttendeesToGhl = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => addAttendeesSchema.parse(d))
   .handler(async ({ data }) => {
-    // One centralized tag (🤝 s&p-{city}-{yymmdd}) — same as the buyer.
+    // One centralized tag (🤝 s&p-{tier}-{city}-{yymmdd}) — same as the buyer.
     // Buyer-vs-attendee is told apart by the contact `source`, not a tag.
-    const tags = [eventTag(data.city, data.endDate)];
+    const tags = [eventTag(data.tier, data.city, data.endDate)];
     const results = await Promise.allSettled(
       data.attendees
         .filter((a) => a.email)
@@ -934,13 +946,14 @@ function bareFieldKey(key: string): string {
   return key.replace(/^(contact|opportunity)\./, "");
 }
 
-// Work out which event a contact belongs to, from the single event tag
-// `🤝 s&p-{slug}-{yymmdd}`. Also tolerates legacy tags (`s&p-{slug}-{YYYY-MM-DD}`,
-// `scale-profit-{slug}`) so contacts tagged before the consolidation still map.
+// Work out which event a contact belongs to, from the event tag
+// `🤝 s&p-{tier}-{slug}-{yymmdd}`. The optional `(ga|vip)-` tier prefix is skipped
+// so the legacy tag `🤝 s&p-{slug}-{yymmdd}` resolves identically. Also tolerates
+// `scale-profit-{slug}` so contacts tagged before the consolidation still map.
 function deriveEventSlug(tags: string[]): string {
   const reserved = new Set(["seminar", "ga", "vip", "attendee"]);
   for (const t of tags) {
-    const eventMatch = t.match(/s&p-([a-z0-9-]+?)-(?:\d{6}|\d{4}-\d{2}-\d{2})$/i);
+    const eventMatch = t.match(/s&p-(?:(?:ga|vip)-)?([a-z0-9-]+?)-(?:\d{6}|\d{4}-\d{2}-\d{2})$/i);
     if (eventMatch) return eventMatch[1].toLowerCase();
     const buyerMatch = t.match(/^scale-profit-([a-z0-9-]+)$/i);
     if (buyerMatch && !reserved.has(buyerMatch[1].toLowerCase())) {
@@ -950,10 +963,14 @@ function deriveEventSlug(tags: string[]): string {
   return "";
 }
 
-// Tier is the product they purchased (GA/VIP), not a tag. Read it from the
-// opportunity name (`… — VIP (city)` / `… — General Admission (city)`), falling
-// back to legacy `scale-profit-vip|ga` tags for pre-consolidation contacts.
+// Tier (GA/VIP) is read FIRST from the event tag `🤝 s&p-{tier}-{city}-{yymmdd}`,
+// which is authoritative. For legacy contacts whose tag predates the tier prefix,
+// fall back to the opportunity name (`… — VIP (city)`) and then legacy tier tags.
 function deriveTier(tags: string[], opportunities?: Array<{ name?: string }>): string {
+  for (const t of tags) {
+    const m = t.match(/s&p-(ga|vip)-[a-z0-9-]+?-(?:\d{6}|\d{4}-\d{2}-\d{2})$/i);
+    if (m) return m[1].toLowerCase() === "vip" ? "VIP" : "General Admission";
+  }
   for (const o of opportunities ?? []) {
     const n = (o.name ?? "").toLowerCase();
     if (/\bvip\b/.test(n)) return "VIP";
@@ -1118,7 +1135,7 @@ export const listSeminarPurchasers = createServerFn({ method: "POST" })
     const searchTags = [
       SEMINAR_TAG, // scale-profit-seminar (legacy umbrella)
       ...DEFAULT_EVENTS.flatMap((e) => [
-        eventTag(e.slug, e.end_date).replace(/^🤝\s*/, ""), // s&p-{city}-{yymmdd}
+        eventTagSearchFragment(e.slug, e.end_date), // {city}-{yymmdd} — matches GA/VIP/legacy
         `scale-profit-${e.slug}`, // legacy per-city tag
       ]),
     ];
@@ -1310,16 +1327,19 @@ const assignSchema = z.object({
   city: z.string().min(1).max(50),
   // ISO end date (YYYY-MM-DD); falls back to the slug's seeded date if omitted.
   endDate: z.string().max(20).optional(),
+  // Tier to record in the tag. Unassigned contacts have no known tier, so the
+  // admin picks one; defaults to GA.
+  tier: z.enum(["ga", "vip"]).optional(),
 });
 
 // Bulk-assign contacts to an event by adding the single centralized event tag
-// (🤝 s&p-{city}-{yymmdd}). Used by the admin to move "Unassigned" purchasers
-// into a city. Adds the tag without removing existing tags.
+// (🤝 s&p-{tier}-{city}-{yymmdd}). Used by the admin to move "Unassigned"
+// purchasers into a city. Adds the tag without removing existing tags.
 export const assignContactsToEvent = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => assignSchema.parse(d))
   .handler(async ({ data }) => {
     assertAdmin(data.password);
-    const tags = [eventTag(data.city, data.endDate)];
+    const tags = [eventTag(data.tier ?? "ga", data.city, data.endDate)];
     const results = await mapWithConcurrency(data.contactIds, 6, async (id) => {
       try {
         await ghlFetch(`/contacts/${id}/tags`, {
@@ -1343,6 +1363,8 @@ export const assignContactsToEvent = createServerFn({ method: "POST" })
 const tagBuyerSchema = z.object({
   email: z.string().email().max(200),
   city: z.string().min(1).max(50),
+  // Tier the buyer purchased, recorded in the event tag. Defaults to GA.
+  tier: z.enum(["ga", "vip"]).optional(),
   // Survey answers from checkout (bridged via the buyer's browser), saved to the
   // contact so the admin card can show them.
   survey: z
@@ -1357,13 +1379,13 @@ const tagBuyerSchema = z.object({
 
 // Finalizes a purchase from the confirmation page (GHL redirects there with
 // {{contact.email}} + {{contact.event_city}}): adds the SINGLE event tag
-// 🤝 s&p-{city}-{yymmdd} and saves the checkout survey answers to the contact.
-// This is the one and only place a buyer is tagged. Additive — never removes
-// existing tags, and re-running it just re-applies the same tag (no duplicate).
+// 🤝 s&p-{tier}-{city}-{yymmdd} and saves the checkout survey answers to the
+// contact. This is the one and only place a buyer is tagged. Additive — never
+// removes existing tags, and re-running it just re-applies the same tag.
 export const tagBuyerForEvent = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => tagBuyerSchema.parse(d))
   .handler(async ({ data }) => {
-    const tag = eventTag(data.city);
+    const tag = eventTag(data.tier ?? "ga", data.city);
     const s = data.survey;
     // Upsert by email to resolve the contact id and (optionally) save the survey
     // answers — agency state to the native State field, the rest to custom
@@ -1443,11 +1465,10 @@ async function countEventSold(
   ) {
     return eventSoldCache.data[slug];
   }
-  // GHL's search 400s on the 🤝 emoji, but a "contains" match on the ASCII
-  // substring still matches the emoji-prefixed tag — so search the ASCII form of
-  // the event tag plus the legacy per-city tag.
-  const asciiTag = eventTag(slug, endDate).replace(/^🤝\s*/, "");
-  const searchTags = [asciiTag, `scale-profit-${slug}`];
+  // The {city}-{yymmdd} fragment is a "contains" substring of the GA, VIP, and
+  // legacy tags alike (GHL 400s on the 🤝 emoji, so we never send it). deriveTier
+  // below splits the matched contacts back into GA vs VIP.
+  const searchTags = [eventTagSearchFragment(slug, endDate), `scale-profit-${slug}`];
   const byId = new Map<string, RawSearchContact>();
   let anySuccess = false;
   const pageLimit = 100;

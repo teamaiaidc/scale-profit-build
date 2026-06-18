@@ -587,6 +587,7 @@ function PurchasesView({
   const upcoming = splitEvents(events, getTodayISO()).upcoming;
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [assignTo, setAssignTo] = useState("");
+  const [assignTier, setAssignTier] = useState<"ga" | "vip">("ga");
   const [assigning, setAssigning] = useState(false);
   const [assignMsg, setAssignMsg] = useState<string | null>(null);
 
@@ -621,6 +622,7 @@ function PurchasesView({
           contactIds: [...selectedIds],
           city: assignTo,
           endDate: ev?.end_date || undefined,
+          tier: assignTier,
         },
       });
       setAssignMsg(
@@ -775,6 +777,15 @@ function PurchasesView({
                             {e.city || e.slug}
                           </option>
                         ))}
+                      </select>
+                      <select
+                        className="h-9 rounded-md border border-input bg-transparent px-2 text-sm"
+                        value={assignTier}
+                        onChange={(e) => setAssignTier(e.target.value as "ga" | "vip")}
+                        aria-label="Ticket tier"
+                      >
+                        <option value="ga">General Admission</option>
+                        <option value="vip">VIP</option>
                       </select>
                       <Button
                         size="sm"

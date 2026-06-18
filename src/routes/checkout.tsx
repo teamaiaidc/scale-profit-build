@@ -190,14 +190,15 @@ function CheckoutPage() {
   }, [city, events]);
 
   // yymmdd from the event's end date, plus the full tag value, so a GHL workflow
-  // can read them off the form and tag the buyer 🤝 s&p-{city}-{yymmdd}.
+  // can read them off the form and tag the buyer 🤝 s&p-{tier}-{city}-{yymmdd}.
   const eventYymmdd = (events.find((e) => e.slug === resolvedCity)?.end_date ?? "").replace(
     /^\d{2}(\d{2})-(\d{2})-(\d{2})$/,
     "$1$2$3",
   );
+  const tierToken = tier === "vip" ? "vip" : "ga";
   const eventTagValue = eventYymmdd
-    ? `🤝 s&p-${resolvedCity}-${eventYymmdd}`
-    : `🤝 s&p-${resolvedCity}`;
+    ? `🤝 s&p-${tierToken}-${resolvedCity}-${eventYymmdd}`
+    : `🤝 s&p-${tierToken}-${resolvedCity}`;
 
   const cityInfo = cities[resolvedCity] ?? cities.boston ?? CITIES.boston;
   const isVip = tier === "vip";
@@ -229,19 +230,12 @@ function CheckoutPage() {
       .catch(() => setAvail(null));
   }, [resolvedCity, resolvedEndDate, availFn]);
 
-  // VIP is hidden entirely for GA-only events (e.g. Nashville); this blocks
-  // immediately (config-based) regardless of counts. Sold-out gating fails open
-  // while availability is still loading.
-  const vipHidden = isVip && !isVipOffered(resolvedCity);
-  const tierSoldOut = isVip ? !!avail?.vip.soldOut : !!avail?.ga.soldOut;
+  // A tier is sold out when it hits its cap, or when it's the VIP tier on a
+  // GA-only event (e.g. Nashville) — both presented to the buyer as "sold out".
+  // The cap side fails open while availability is still loading.
+  const vipUnavailable = isVip && !isVipOffered(resolvedCity);
+  const tierSoldOut = (isVip ? !!avail?.vip.soldOut : !!avail?.ga.soldOut) || vipUnavailable;
   const blockedInfo = useMemo(() => {
-    if (vipHidden) {
-      return {
-        title: `VIP isn't available for ${cityInfo.name}`,
-        body: "This event is General Admission only.",
-        switchTier: "ga" as const,
-      };
-    }
     if (isVip && tierSoldOut) {
       return {
         title: `VIP is sold out for ${cityInfo.name}`,
@@ -260,7 +254,7 @@ function CheckoutPage() {
       };
     }
     return null;
-  }, [vipHidden, isVip, tierSoldOut, cityInfo.name, resolvedCity, avail]);
+  }, [isVip, tierSoldOut, cityInfo.name, resolvedCity, avail]);
 
   // Two-step checkout: (1) questions, (2) payment. Name, email, phone, card and
   // quantity are all collected once inside the embedded GHL payment form.

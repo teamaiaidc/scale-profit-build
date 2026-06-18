@@ -40,8 +40,8 @@ function ConfirmationPage() {
   const { city, tier, firstName, email } = Route.useSearch();
   const isVip = tier === "vip";
 
-  // Tag the buyer 🤝 s&p-{city}-{yymmdd} now that the purchase is done. GHL
-  // redirects here with the contact's email + event_city, so this is the
+  // Tag the buyer 🤝 s&p-{tier}-{city}-{yymmdd} now that the purchase is done.
+  // GHL redirects here with the contact's email + event_city, so this is the
   // reliable place to apply the tag (the in-page payment message lacks them).
   const tagBuyer = useServerFn(tagBuyerForEvent);
   useEffect(() => {
@@ -54,7 +54,7 @@ function ConfirmationPage() {
     } catch {
       /* ignore */
     }
-    tagBuyer({ data: { email, city, survey } })
+    tagBuyer({ data: { email, city, tier: isVip ? "vip" : "ga", survey } })
       .then(() => {
         try {
           window.localStorage.removeItem("sp-pending-survey");
@@ -65,7 +65,7 @@ function ConfirmationPage() {
       .catch(() => {
         /* non-blocking — admin can still bulk-assign from the dashboard */
       });
-  }, [email, city, tagBuyer]);
+  }, [email, city, isVip, tagBuyer]);
 
   // Greet the buyer by name. The name may arrive in the URL; if not but we have
   // their email, look it up from GHL so the greeting still personalizes.
