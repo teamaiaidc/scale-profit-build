@@ -4,9 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import { Check, Calendar, MapPin, Clock, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { getVipAvailability, type VipAvailability } from "@/lib/ghl.functions";
+import { getEventAvailability, type EventAvailability } from "@/lib/ghl.functions";
 import { listEvents } from "@/lib/events.functions";
-import { getTodayISO, splitEvents, type EventRow } from "@/lib/events";
+import { getTodayISO, splitEvents, isVipOffered, type EventRow } from "@/lib/events";
 import { loadStoredEvents } from "@/lib/events.store";
 import logo from "@/assets/hero-banner.webp";
 import coachesHero from "@/assets/hero-coaches.jpg";
@@ -147,8 +147,7 @@ function Section({
   // "faded" = a true light/white section like the live site: the .section-light
   // class locally overrides the theme tokens so the background, text, cards and
   // borders all flip to a light palette (see styles.css).
-  const toneClass =
-    tone === "faded" ? "section-light" : tone === "light" ? "bg-card/40" : "";
+  const toneClass = tone === "faded" ? "section-light" : tone === "light" ? "bg-card/40" : "";
   return (
     <section id={id} className={`scroll-mt-24 px-6 py-20 md:py-28 ${toneClass} ${className}`}>
       <div className="mx-auto max-w-6xl">{children}</div>
@@ -184,17 +183,18 @@ function Index() {
   const { upcoming } = splitEvents(allEvents, getTodayISO());
   const events = upcoming.length > 0 ? upcoming : allEvents;
 
-  // VIP availability (e.g. Nashville cap of 20) for the open event — to disable
-  // the VIP "Sign Up" button when it's sold out.
-  const vipAvailFn = useServerFn(getVipAvailability);
-  const [vipBySlug, setVipBySlug] = useState<Record<string, VipAvailability>>({});
+  // Live GA + VIP availability (GA cap 100, VIP cap 20) for the open event — to
+  // mark a tier "Sold Out" once it reaches its limit.
+  const availFn = useServerFn(getEventAvailability);
+  const [availBySlug, setAvailBySlug] = useState<Record<string, EventAvailability>>({});
   const openSlug = openEvent !== null ? events[openEvent]?.slug : undefined;
+  const openEndDate = openEvent !== null ? events[openEvent]?.end_date : undefined;
   useEffect(() => {
-    if (!openSlug || vipBySlug[openSlug]) return;
-    vipAvailFn({ data: { city: openSlug } })
-      .then((a) => setVipBySlug((m) => ({ ...m, [openSlug]: a })))
+    if (!openSlug || availBySlug[openSlug]) return;
+    availFn({ data: { city: openSlug, endDate: openEndDate } })
+      .then((a) => setAvailBySlug((m) => ({ ...m, [openSlug]: a })))
       .catch(() => {});
-  }, [openSlug, vipBySlug, vipAvailFn]);
+  }, [openSlug, openEndDate, availBySlug, availFn]);
   const featured = events[0];
 
   return (
@@ -203,11 +203,7 @@ function Index() {
       <header className="sticky top-0 z-50 border-b border-border bg-background/85 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
           <Link to="/" className="flex items-center gap-2">
-            <img
-              src={logo}
-              alt="Scale & Profit"
-              className="h-10 w-auto"
-            />
+            <img src={logo} alt="Scale & Profit" className="h-10 w-auto" />
           </Link>
           <Button onClick={scrollToOffers}>Sign up Now!</Button>
         </div>
@@ -247,9 +243,15 @@ function Index() {
       <Section tone="light" className="border-y border-border">
         <div className="grid gap-8 md:grid-cols-3">
           {[
-            ["Maximize Profit", "Understand & control the levers of true, sustainable profitability."],
+            [
+              "Maximize Profit",
+              "Understand & control the levers of true, sustainable profitability.",
+            ],
             ["A-Player Culture", "Attract, develop, and retain top talent that drives results."],
-            ["Own Your Freedom", "Design systems that liberate your time and run effectively without you."],
+            [
+              "Own Your Freedom",
+              "Design systems that liberate your time and run effectively without you.",
+            ],
           ].map(([t, d]) => (
             <div key={t} className="text-center">
               <h3 className="text-2xl font-bold text-primary">{t}</h3>
@@ -303,9 +305,9 @@ function Index() {
             <h3 className="text-2xl font-bold">David Peterson (Coach P)</h3>
             <p className="mt-1 italic text-primary">Systems & Team Building Expert</p>
             <p className="mt-4 text-muted-foreground">
-              Father of four, founder of Coach P, and owner of 3 thriving agencies in
-              Dallas/Fort Worth. David built his insurance business organically, without debt,
-              by focusing on value, delegation, and empowering his people.
+              Father of four, founder of Coach P, and owner of 3 thriving agencies in Dallas/Fort
+              Worth. David built his insurance business organically, without debt, by focusing on
+              value, delegation, and empowering his people.
             </p>
             <ul className="mt-5 space-y-2 text-sm">
               {[
@@ -334,9 +336,9 @@ function Index() {
             <h3 className="text-2xl font-bold">Alex Shattuck</h3>
             <p className="mt-1 italic text-primary">Autopilot Recruiting</p>
             <p className="mt-4 text-muted-foreground">
-              Alex launched his first office in Owosso, MI in 2012, his New Market MOA in
-              DeWitt in 2018, and a third office in Rockford in 2022. A USMC veteran and
-              best-selling author of "Complacency Kills" and "Small Business, BIG RECRUITING."
+              Alex launched his first office in Owosso, MI in 2012, his New Market MOA in DeWitt in
+              2018, and a third office in Rockford in 2022. A USMC veteran and best-selling author
+              of "Complacency Kills" and "Small Business, BIG RECRUITING."
             </p>
             <ul className="mt-5 space-y-2 text-sm">
               {[
@@ -429,9 +431,7 @@ function Index() {
           <Card className="p-5">
             <Sparkles className="h-5 w-5 text-primary" />
             <p className="mt-2 text-sm text-muted-foreground">Extras</p>
-            <p className="font-semibold">
-              {featured.details || "Networking Cocktail Hour Day 1"}
-            </p>
+            <p className="font-semibold">{featured.details || "Networking Cocktail Hour Day 1"}</p>
           </Card>
         </div>
 
@@ -495,10 +495,7 @@ function Index() {
                     </Button>
                   </Card>
                 ) : (
-                  <Card
-                    key={`tbd-${i}`}
-                    className="flex flex-col border-dashed p-6 opacity-80"
-                  >
+                  <Card key={`tbd-${i}`} className="flex flex-col border-dashed p-6 opacity-80">
                     <h3 className="text-2xl font-bold text-muted-foreground">TBD</h3>
                     <p className="mt-1 text-sm uppercase tracking-[0.2em] text-primary">
                       Coming Soon
@@ -542,60 +539,63 @@ function Index() {
                       </span>
                     </h3>
                   </div>
-                  <p className="text-sm text-muted-foreground">
-                    {events[openEvent]!.venue}
-                  </p>
+                  <p className="text-sm text-muted-foreground">{events[openEvent]!.venue}</p>
                 </div>
                 <div className="grid gap-6 md:grid-cols-2">
-                  {tiers.map((tier) => {
+                  {(() => {
                     const slug = events[openEvent]!.slug;
-                    const vip = vipBySlug[slug];
-                    const vipSoldOut = tier.featured && !!vip?.limited && vip.soldOut;
-                    return (
-                    <Card
-                      key={tier.name}
-                      className={`flex h-full flex-col p-6 ${tier.featured ? "border-primary" : ""}`}
-                    >
-                      <h4 className="text-xl font-bold">
-                        {tier.name}
-                        <span className="mt-1 block text-sm font-normal text-muted-foreground sm:mt-0 sm:ml-1 sm:inline sm:text-base">
-                          — {events[openEvent]!.city}
-                        </span>
-                      </h4>
-                      <p className="mt-2 text-3xl font-black text-primary">{tier.price}</p>
-                      {tier.note && (
-                        <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                          {tier.note}
-                        </p>
-                      )}
-                      <ul className="mt-4 flex-1 space-y-2 text-sm">
-                        {tier.perks.map((p) => (
-                          <li key={p} className="flex gap-2">
-                            <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-                            <span>{p}</span>
-                          </li>
-                        ))}
-                      </ul>
-                      {vipSoldOut ? (
-                        <Button className="mt-6 w-full" variant="outline" disabled>
-                          VIP Sold Out
-                        </Button>
-                      ) : (
-                        <Button asChild className="mt-6 w-full">
-                          <Link
-                            to="/checkout"
-                            search={{
-                              city: events[openEvent]!.slug,
-                              tier: tier.featured ? "vip" : "ga",
-                            }}
-                          >
-                            Sign Up Now!
-                          </Link>
-                        </Button>
-                      )}
-                    </Card>
-                    );
-                  })}
+                    // Hide the VIP tier entirely for GA-only events (e.g. Nashville).
+                    const visibleTiers = tiers.filter((t) => !t.featured || isVipOffered(slug));
+                    const avail = availBySlug[slug];
+                    return visibleTiers.map((tier) => {
+                      const tierAvail = tier.featured ? avail?.vip : avail?.ga;
+                      const soldOut = !!tierAvail?.soldOut;
+                      return (
+                        <Card
+                          key={tier.name}
+                          className={`flex h-full flex-col p-6 ${tier.featured ? "border-primary" : ""}`}
+                        >
+                          <h4 className="text-xl font-bold">
+                            {tier.name}
+                            <span className="mt-1 block text-sm font-normal text-muted-foreground sm:mt-0 sm:ml-1 sm:inline sm:text-base">
+                              — {events[openEvent]!.city}
+                            </span>
+                          </h4>
+                          <p className="mt-2 text-3xl font-black text-primary">{tier.price}</p>
+                          {tier.note && (
+                            <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                              {tier.note}
+                            </p>
+                          )}
+                          <ul className="mt-4 flex-1 space-y-2 text-sm">
+                            {tier.perks.map((p) => (
+                              <li key={p} className="flex gap-2">
+                                <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                                <span>{p}</span>
+                              </li>
+                            ))}
+                          </ul>
+                          {soldOut ? (
+                            <Button className="mt-6 w-full" variant="outline" disabled>
+                              {tier.featured ? "VIP Sold Out" : "Sold Out"}
+                            </Button>
+                          ) : (
+                            <Button asChild className="mt-6 w-full">
+                              <Link
+                                to="/checkout"
+                                search={{
+                                  city: events[openEvent]!.slug,
+                                  tier: tier.featured ? "vip" : "ga",
+                                }}
+                              >
+                                Sign Up Now!
+                              </Link>
+                            </Button>
+                          )}
+                        </Card>
+                      );
+                    });
+                  })()}
                 </div>
               </div>
             )}
@@ -605,9 +605,7 @@ function Index() {
 
       {/* Game plan */}
       <Section tone="faded">
-        <h2 className="text-center text-3xl font-bold md:text-5xl">
-          The Scale & Profit Game Plan
-        </h2>
+        <h2 className="text-center text-3xl font-bold md:text-5xl">The Scale & Profit Game Plan</h2>
         <div className="mt-12 grid gap-6 md:grid-cols-3">
           {[
             ["1", "Attend the Seminar", "Register and join us at our upcoming seminar."],
@@ -644,11 +642,7 @@ function Index() {
           Thank You For Being a Scale & Profit Sponsor
         </h2>
         <div className="mt-12 flex flex-wrap items-center justify-center gap-12">
-          <img
-            src={sponsorAgero}
-            alt="Agero"
-            className="h-16 w-auto object-contain"
-          />
+          <img src={sponsorAgero} alt="Agero" className="h-16 w-auto object-contain" />
         </div>
       </Section>
 
@@ -659,14 +653,14 @@ function Index() {
             You Deserve a Business That Works for You
           </h2>
           <p className="mt-6 text-muted-foreground">
-            You want to grow your business, lead your team with confidence, and increase
-            profits — while still having time and energy for what matters most. You need clear
-            systems, a dependable team, and a strategy that makes growing predictable.
+            You want to grow your business, lead your team with confidence, and increase profits —
+            while still having time and energy for what matters most. You need clear systems, a
+            dependable team, and a strategy that makes growing predictable.
           </p>
           <p className="mt-4 text-muted-foreground">
-            That's why we created the Scale & Profit Seminar — two days of hands-on learning
-            where we share the exact frameworks, strategies, and tools we've used to build
-            multiple high-performing agencies.
+            That's why we created the Scale & Profit Seminar — two days of hands-on learning where
+            we share the exact frameworks, strategies, and tools we've used to build multiple
+            high-performing agencies.
           </p>
           <Button size="lg" className="mt-8" onClick={scrollToOffers}>
             Reserve Your Seat
@@ -678,8 +672,12 @@ function Index() {
         <div className="mx-auto flex max-w-6xl flex-col items-center gap-6 text-center">
           <img src={logo} alt="Scale & Profit" className="h-16 w-auto" />
           <div className="flex flex-wrap items-center justify-center gap-6 text-sm text-muted-foreground">
-            <a href="#" className="hover:text-foreground">Terms &amp; Conditions</a>
-            <a href="#" className="hover:text-foreground">Privacy Policy</a>
+            <a href="#" className="hover:text-foreground">
+              Terms &amp; Conditions
+            </a>
+            <a href="#" className="hover:text-foreground">
+              Privacy Policy
+            </a>
           </div>
           <p className="text-sm text-muted-foreground">
             © {new Date().getFullYear()} Scale &amp; Profit. All rights reserved.

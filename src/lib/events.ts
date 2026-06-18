@@ -41,7 +41,7 @@ export const DEFAULT_EVENTS: EventRow[] = [
     city: "California",
     date: "December 8th–9th, 2026",
     end_date: "2026-12-09",
-    venue: "Venue TBA",
+    venue: "Venue TBD",
     address: "California",
     time: "9:00 AM – 4:00 PM",
     details: "",
@@ -62,6 +62,15 @@ export function normalizeEvent(e: Partial<EventRow>): EventRow {
     details: e.details ?? "",
     sort_order: e.sort_order ?? 0,
   };
+}
+
+// Events that are General-Admission only — the VIP tier is hidden on the landing
+// page and blocked at checkout for these cities.
+export const VIP_HIDDEN_SLUGS = new Set<string>(["nashville"]);
+
+// Whether the VIP tier is offered for a given event slug.
+export function isVipOffered(slug: string): boolean {
+  return !VIP_HIDDEN_SLUGS.has(slug.toLowerCase());
 }
 
 // Local date as YYYY-MM-DD, for comparing against an event's end_date.

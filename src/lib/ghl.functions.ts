@@ -147,9 +147,11 @@ export const submitCheckoutToGhl = createServerFn({ method: "POST" })
       { key: FIELD_KEYS.ticketQuantity, field_value: String(data.quantity) },
       { key: FIELD_KEYS.ticketQuantityLegacy, field_value: String(data.quantity) },
     ];
-    // NOTE: tagging is done in ONE place only — tagBuyerForEvent on the
-    // confirmation page (reached via GHL's redirect). We deliberately do NOT
-    // tag here, so a buyer never gets two tags. We omit `tags` from the upsert.
+    // NOTE: the BUYER is tagged in ONE place only — tagBuyerForEvent on the
+    // confirmation page (reached via GHL's redirect) — so a buyer never gets two
+    // tags. We omit `tags` from the buyer upsert. Additional attendees (below) do
+    // carry the single event tag, same as addAttendeesToGhl.
+    const tags = [eventTag(data.city)];
 
     // 1. Upsert primary buyer contact + fetch pipelines in parallel
     //    (pipelines lookup doesn't depend on the contact, so we save a
@@ -571,9 +573,7 @@ export const getGhlTicketQuantityByEmail = createServerFn({ method: "POST" })
       // {{contact.sp_no_of_ticket_purchased}} immediately after purchase.
       const contactMeta = await getFieldMeta();
       const contactTicketIds = new Set(
-        [...contactMeta.entries()]
-          .filter(([, m]) => isTicketQuantityField(m))
-          .map(([id]) => id),
+        [...contactMeta.entries()].filter(([, m]) => isTicketQuantityField(m)).map(([id]) => id),
       );
       let fieldQty = 0;
       let raw = "";
@@ -1224,7 +1224,10 @@ export const listSeminarPurchasers = createServerFn({ method: "POST" })
         if (row.isAttendee || !row.id) return row;
         const [paid, counts] = await Promise.all([
           fetchPaymentAmount(row.id, row.email).catch(() => 0),
-          resolveBuyerCounts(row.id, row.email).catch(() => ({ ticketQuantity: 0, attendeesAdded: 0 })),
+          resolveBuyerCounts(row.id, row.email).catch(() => ({
+            ticketQuantity: 0,
+            attendeesAdded: 0,
+          })),
         ]);
         return {
           ...row,
@@ -1279,9 +1282,9 @@ export const getPurchaserDetail = createServerFn({ method: "POST" })
     // ({{contact.sp_no_of_ticket_purchased}}), fall back to opportunity / legacy fields.
     const contactQty = Number.parseInt(
       valueOf(FIELD_KEYS.ticketQuantity) ||
-      valueOf(FIELD_KEYS.ticketQuantityLegacy) ||
-      valueOf(FIELD_KEYS.ticketQuantityLegacy2) ||
-      valueOf(FIELD_KEYS.ticketQuantityLegacy3),
+        valueOf(FIELD_KEYS.ticketQuantityLegacy) ||
+        valueOf(FIELD_KEYS.ticketQuantityLegacy2) ||
+        valueOf(FIELD_KEYS.ticketQuantityLegacy3),
       10,
     );
     const oppTickets = await fetchOpportunityTicketCount(data.contactId, c.email ?? "");
@@ -1330,7 +1333,11 @@ export const assignContactsToEvent = createServerFn({ method: "POST" })
       }
     });
     const assigned = results.filter(Boolean).length;
-    return { ok: assigned === data.contactIds.length, assigned, failed: data.contactIds.length - assigned };
+    return {
+      ok: assigned === data.contactIds.length,
+      assigned,
+      failed: data.contactIds.length - assigned,
+    };
   });
 
 const tagBuyerSchema = z.object({
@@ -1389,78 +1396,136 @@ export const tagBuyerForEvent = createServerFn({ method: "POST" })
     return { ok: true, tag };
   });
 
-// ============== VIP ticket caps ==============
+// ============== Event ticket caps (live, tag-based) ==============
 
-// Per-event VIP purchase limit (slug → max VIP tickets). Only events listed here
-// are capped; everything else is unlimited.
-export const VIP_LIMITS: Record<string, number> = { nashville: 20 };
+// Per-tier purchase limits applied to EVERY event. Counts are derived live from
+// the single event tag 🤝 s&p-{city}-{yymmdd} carried by every buyer + attendee:
+//   • VIP sold = contacts tagged for the event whose tier is VIP
+//   • GA sold  = every other tagged contact (GA buyers + their attendees; VIP is
+//                single-seat, so attendees only ever fill GA seats)
+// Once a tier reaches its limit the landing page + checkout mark it sold out.
+export const TIER_LIMITS = { ga: 100, vip: 20 } as const;
+export type Tier = keyof typeof TIER_LIMITS;
 
-// Per-event GHL location *custom value* that tracks VIP purchases. A GHL workflow
-// increments it on each VIP purchase, so despite the "remaining" name it actually
-// holds the SOLD count — the source of truth (no contact scanning). Nashville only.
-const VIP_SOLD_VALUE_KEYS: Record<string, string> = {
-  nashville: "sp_nashville_vip_ticket_remaining",
-};
-
-// Read the VIP *sold* custom value for an event. Returns null if the city has no
-// configured value or it can't be read. Cached briefly (checkout/landing hit this
-// on load).
-let vipSoldCache: { at: number; data: Record<string, number> } | null = null;
-const VIP_SOLD_TTL_MS = 60 * 1000;
-
-async function readVipSold(city: string): Promise<number | null> {
-  const slug = city.toLowerCase();
-  const key = VIP_SOLD_VALUE_KEYS[slug];
-  if (!key) return null;
-  if (vipSoldCache && Date.now() - vipSoldCache.at < VIP_SOLD_TTL_MS && slug in vipSoldCache.data) {
-    return vipSoldCache.data[slug];
+// Split a set of event-tagged contacts into GA vs VIP seat counts, using the same
+// tier/event derivation as the admin Attendees list. `slug` filters to contacts
+// whose event tag actually resolves to this event.
+export function countSeatsByTier(
+  contacts: Array<{ tags?: string[]; opportunities?: Array<{ name?: string }> }>,
+  slug: string,
+): { ga: number; vip: number } {
+  let ga = 0;
+  let vip = 0;
+  for (const c of contacts) {
+    const tags = (c.tags ?? []).map((t) => String(t));
+    if (deriveEventSlug(tags) !== slug) continue;
+    if (deriveTier(tags, c.opportunities) === "VIP") vip++;
+    else ga++;
   }
-  try {
-    const res = (await ghlFetch(`/locations/${GHL_LOCATION_ID}/customValues`, {
-      method: "GET",
-    })) as {
-      customValues?: Array<{ name?: string; fieldKey?: string; value?: string }>;
-    };
-    const target = (res.customValues ?? []).find((v) => {
-      const k = `${v.fieldKey ?? ""} ${v.name ?? ""}`.toLowerCase().replace(/[^a-z0-9]+/g, "_");
-      return k.includes(key.toLowerCase());
-    });
-    if (!target) return null;
-    const m = String(target.value ?? "").match(/-?\d+/);
-    if (!m) return null;
-    const sold = Number(m[0]);
-    vipSoldCache = { at: Date.now(), data: { ...(vipSoldCache?.data ?? {}), [slug]: sold } };
-    return sold;
-  } catch (err) {
-    console.warn("GHL VIP custom-value fetch failed:", (err as Error).message);
-    return null;
-  }
+  return { ga, vip };
 }
 
-export type VipAvailability = {
-  limited: boolean;
+// Count the buyers/attendees tagged for one event, split by tier. Returns null if
+// GHL couldn't be reached at all (so callers fail OPEN and never block a sale on
+// an outage). Cached briefly — the public checkout + landing pages hit this on load.
+let eventSoldCache: { at: number; data: Record<string, { ga: number; vip: number }> } | null = null;
+const EVENT_SOLD_TTL_MS = 60 * 1000;
+
+async function countEventSold(
+  city: string,
+  endDate?: string,
+): Promise<{ ga: number; vip: number } | null> {
+  const slug = city.toLowerCase();
+  if (
+    eventSoldCache &&
+    Date.now() - eventSoldCache.at < EVENT_SOLD_TTL_MS &&
+    slug in eventSoldCache.data
+  ) {
+    return eventSoldCache.data[slug];
+  }
+  // GHL's search 400s on the 🤝 emoji, but a "contains" match on the ASCII
+  // substring still matches the emoji-prefixed tag — so search the ASCII form of
+  // the event tag plus the legacy per-city tag.
+  const asciiTag = eventTag(slug, endDate).replace(/^🤝\s*/, "");
+  const searchTags = [asciiTag, `scale-profit-${slug}`];
+  const byId = new Map<string, RawSearchContact>();
+  let anySuccess = false;
+  const pageLimit = 100;
+  for (const tag of searchTags) {
+    try {
+      for (let page = 1; page <= 20; page++) {
+        const res = (await ghlFetch("/contacts/search", {
+          method: "POST",
+          body: JSON.stringify({
+            locationId: GHL_LOCATION_ID,
+            page,
+            pageLimit,
+            filters: [{ field: "tags", operator: "contains", value: tag }],
+          }),
+        })) as { contacts?: RawSearchContact[] };
+        anySuccess = true;
+        const batch = res.contacts ?? [];
+        for (const c of batch) {
+          const id = String(c.id ?? c.contactId ?? "");
+          if (id) byId.set(id, c);
+        }
+        if (batch.length < pageLimit) break;
+      }
+    } catch (err) {
+      console.warn(`GHL event-count search failed for tag "${tag}":`, (err as Error).message);
+    }
+  }
+  if (!anySuccess) return null;
+
+  const data = countSeatsByTier([...byId.values()], slug);
+  eventSoldCache = { at: Date.now(), data: { ...(eventSoldCache?.data ?? {}), [slug]: data } };
+  return data;
+}
+
+export type TierAvailability = {
   limit: number;
   sold: number;
   remaining: number;
   soldOut: boolean;
 };
 
-const vipAvailInputSchema = z.object({ city: z.string().min(1).max(50) });
+export type EventAvailability = {
+  // false when live counts couldn't be read — the UI must fail open in that case
+  // (never block a sale because GHL was briefly unreachable).
+  counted: boolean;
+  ga: TierAvailability;
+  vip: TierAvailability;
+};
 
-// Public: how many VIP tickets are left for an event, from the GHL custom value
-// {{custom_values.sp_nashville_vip_ticket_remaining}}. Used by checkout + landing
-// to disable VIP once it hits 0, and by the admin to show availability.
-export const getVipAvailability = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) => vipAvailInputSchema.parse(d))
-  .handler(async ({ data }): Promise<VipAvailability> => {
-    const limit = VIP_LIMITS[data.city.toLowerCase()] ?? 0;
-    if (!limit) return { limited: false, limit: 0, sold: 0, remaining: 0, soldOut: false };
-    const soldValue = await readVipSold(data.city);
-    // If the custom value can't be read, don't block sales — treat as available.
-    if (soldValue === null) {
-      return { limited: true, limit, sold: 0, remaining: limit, soldOut: false };
-    }
-    const sold = Math.min(Math.max(soldValue, 0), limit);
-    const remaining = Math.max(limit - sold, 0);
-    return { limited: true, limit, sold, remaining, soldOut: remaining <= 0 };
+// Build a per-tier availability object from a raw sold count (or null counts).
+export function tierAvailability(
+  tier: Tier,
+  counts: { ga: number; vip: number } | null,
+): TierAvailability {
+  const limit = TIER_LIMITS[tier];
+  if (!counts) return { limit, sold: 0, remaining: limit, soldOut: false };
+  const sold = Math.max(counts[tier], 0);
+  const remaining = Math.max(limit - sold, 0);
+  return { limit, sold, remaining, soldOut: remaining <= 0 };
+}
+
+const eventAvailInputSchema = z.object({
+  city: z.string().min(1).max(50),
+  // ISO end date (YYYY-MM-DD); used to build the event tag. Falls back to the
+  // seeded default for the slug when omitted.
+  endDate: z.string().max(20).optional(),
+});
+
+// Public: live GA + VIP availability for an event, counted from the event tag.
+// Used by the landing page + checkout to mark a tier sold out once it reaches its
+// limit. Fails open (soldOut=false) whenever the counts can't be read.
+export const getEventAvailability = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) => eventAvailInputSchema.parse(d))
+  .handler(async ({ data }): Promise<EventAvailability> => {
+    const counts = await countEventSold(data.city, data.endDate);
+    return {
+      counted: Boolean(counts),
+      ga: tierAvailability("ga", counts),
+      vip: tierAvailability("vip", counts),
+    };
   });

@@ -39,11 +39,9 @@ import {
   getPurchaserDetail,
   addAttendeesToGhl,
   assignContactsToEvent,
-  getVipAvailability,
-  VIP_LIMITS,
+  TIER_LIMITS,
   type SeminarPurchaser,
   type PurchaserDetail,
-  type VipAvailability,
 } from "@/lib/ghl.functions";
 import { getTodayISO, splitEvents, type EventRow } from "@/lib/events";
 import { loadStoredEvents, saveStoredEvents } from "@/lib/events.store";
@@ -132,7 +130,7 @@ const TEST_EVENTS: EventRow[] = [
     city: "California",
     date: "December 8th–9th, 2026",
     end_date: "2026-12-09",
-    venue: "Venue TBA",
+    venue: "Venue TBD",
     address: "California",
     time: "9:00 AM – 4:00 PM",
     details: "",
@@ -592,18 +590,6 @@ function PurchasesView({
   const [assigning, setAssigning] = useState(false);
   const [assignMsg, setAssignMsg] = useState<string | null>(null);
 
-  // VIP availability (from the GHL custom value) for capped events, e.g. Nashville.
-  const vipAvailFn = useServerFn(getVipAvailability);
-  const [vipBySlug, setVipBySlug] = useState<Record<string, VipAvailability>>({});
-  useEffect(() => {
-    for (const slug of Object.keys(VIP_LIMITS)) {
-      if (vipBySlug[slug]) continue;
-      vipAvailFn({ data: { city: slug } })
-        .then((a) => setVipBySlug((m) => ({ ...m, [slug]: a })))
-        .catch(() => {});
-    }
-  }, [vipAvailFn, vipBySlug]);
-
   const toggleSelected = (id: string) =>
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -675,11 +661,7 @@ function PurchasesView({
       <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
         <div className="flex flex-wrap gap-3">
           <Stat icon={<Users className="h-4 w-4" />} label="People" value={String(totalPeople)} />
-          <Stat
-            icon={<Ticket className="h-4 w-4" />}
-            label="Buyers"
-            value={String(totalBuyers)}
-          />
+          <Stat icon={<Ticket className="h-4 w-4" />} label="Buyers" value={String(totalBuyers)} />
           <Stat
             icon={<Users className="h-4 w-4" />}
             label="Attendees added"
@@ -733,154 +715,177 @@ function PurchasesView({
             {(() => {
               const isUnassigned = group.slug === "unknown";
               return (
-            <>
-            <div className="mb-3 flex flex-wrap items-baseline justify-between gap-4">
-              <h2 className="text-lg font-bold capitalize">{group.name}</h2>
-              <p className="text-sm text-muted-foreground">
-                {group.buyers.length} {group.buyers.length === 1 ? "buyer" : "buyers"} ·{" "}
-                {group.attendees.length} attendee{group.attendees.length === 1 ? "" : "s"} added
-              </p>
-            </div>
-
-            {VIP_LIMITS[group.slug] != null &&
-              vipBySlug[group.slug] &&
-              (() => {
-                const v = vipBySlug[group.slug];
-                return (
-                  <div className="mb-3 flex items-center gap-2 rounded-lg border border-primary/40 bg-primary/5 p-3 text-sm">
-                    <Ticket className="h-4 w-4 text-primary" />
-                    <span className="font-semibold">VIP tickets:</span>
-                    <span>
-                      {v.sold} / {v.limit} sold
-                    </span>
-                    <span className={v.remaining > 0 ? "text-primary" : "text-destructive"}>
-                      · {v.remaining > 0 ? `${v.remaining} available` : "Sold out"}
-                    </span>
+                <>
+                  <div className="mb-3 flex flex-wrap items-baseline justify-between gap-4">
+                    <h2 className="text-lg font-bold capitalize">{group.name}</h2>
+                    <p className="text-sm text-muted-foreground">
+                      {group.buyers.length} {group.buyers.length === 1 ? "buyer" : "buyers"} ·{" "}
+                      {group.attendees.length} attendee{group.attendees.length === 1 ? "" : "s"}{" "}
+                      added
+                    </p>
                   </div>
-                );
-              })()}
 
-            {isUnassigned && (
-              <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/20 p-3">
-                <span className="text-sm text-muted-foreground">{selectedIds.size} selected</span>
-                <select
-                  className="h-9 rounded-md border border-input bg-transparent px-2 text-sm"
-                  value={assignTo}
-                  onChange={(e) => setAssignTo(e.target.value)}
-                >
-                  <option value="">Assign to event…</option>
-                  {upcoming.map((e) => (
-                    <option key={e.slug} value={e.slug}>
-                      {e.city || e.slug}
-                    </option>
-                  ))}
-                </select>
-                <Button
-                  size="sm"
-                  onClick={handleBulkAssign}
-                  disabled={assigning || !assignTo || selectedIds.size === 0}
-                >
-                  {assigning && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
-                  Assign to event
-                </Button>
-                {assignMsg && <span className="text-xs text-primary">{assignMsg}</span>}
-              </div>
-            )}
+                  {!isUnassigned &&
+                    (() => {
+                      // Seats sold per tier, counted from the event-tagged contacts in
+                      // this group — VIP = VIP-tier contacts; GA = everyone else (GA
+                      // buyers + attendees). Mirrors the public availability counts.
+                      const vipSold = group.rows.filter((r) => r.tier === "VIP").length;
+                      const gaSold = group.rows.length - vipSold;
+                      const tiers: Array<{ label: string; sold: number; limit: number }> = [
+                        { label: "GA", sold: gaSold, limit: TIER_LIMITS.ga },
+                        { label: "VIP", sold: vipSold, limit: TIER_LIMITS.vip },
+                      ];
+                      return (
+                        <div className="mb-3 flex flex-wrap items-center gap-4 rounded-lg border border-primary/40 bg-primary/5 p-3 text-sm">
+                          <Ticket className="h-4 w-4 text-primary" />
+                          {tiers.map((t) => {
+                            const remaining = Math.max(t.limit - t.sold, 0);
+                            return (
+                              <span key={t.label} className="flex items-center gap-1.5">
+                                <span className="font-semibold">{t.label} tickets:</span>
+                                <span>
+                                  {t.sold} / {t.limit} sold
+                                </span>
+                                <span
+                                  className={remaining > 0 ? "text-primary" : "text-destructive"}
+                                >
+                                  · {remaining > 0 ? `${remaining} available` : "Sold out"}
+                                </span>
+                              </span>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
 
-            <Card className="overflow-hidden">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    {isUnassigned && (
-                      <TableHead className="w-8">
-                        <input
-                          type="checkbox"
-                          className="accent-primary"
-                          aria-label="Select all"
-                          checked={
-                            group.rows.some((r) => r.id) &&
-                            group.rows.every((r) => !r.id || selectedIds.has(r.id))
-                          }
-                          onChange={() => toggleAll(group.rows)}
-                        />
-                      </TableHead>
-                    )}
-                    <TableHead>Name</TableHead>
-                    <TableHead>Email</TableHead>
-                    <TableHead>Phone</TableHead>
-                    <TableHead>Tier</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead className="text-center">Tickets Purchased</TableHead>
-                    <TableHead className="text-center">Unassigned Tickets</TableHead>
-                    <TableHead>Purchased On</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {group.rows.map((p) => {
-                    const qty = p.ticketQuantity || 0;
-                    // Buyer = 1 seat; remaining = total − buyer − attendees already added.
-                    const remaining =
-                      !p.isAttendee && qty > 0 ? Math.max(qty - 1 - p.attendeesAdded, 0) : 0;
-                    return (
-                      <TableRow
-                        key={p.id || p.email}
-                        className="cursor-pointer"
-                        onClick={() => setSelected(p)}
+                  {isUnassigned && (
+                    <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/20 p-3">
+                      <span className="text-sm text-muted-foreground">
+                        {selectedIds.size} selected
+                      </span>
+                      <select
+                        className="h-9 rounded-md border border-input bg-transparent px-2 text-sm"
+                        value={assignTo}
+                        onChange={(e) => setAssignTo(e.target.value)}
                       >
-                        {isUnassigned && (
-                          <TableCell onClick={(e) => e.stopPropagation()}>
-                            <input
-                              type="checkbox"
-                              className="accent-primary"
-                              checked={selectedIds.has(p.id)}
-                              onChange={() => toggleSelected(p.id)}
-                              disabled={!p.id}
-                            />
-                          </TableCell>
-                        )}
-                        <TableCell className="font-medium">{p.name || "—"}</TableCell>
-                        <TableCell className="text-muted-foreground">{p.email || "—"}</TableCell>
-                        <TableCell className="text-muted-foreground">{p.phone || "—"}</TableCell>
-                        <TableCell>{p.tier || "—"}</TableCell>
-                        <TableCell>
-                          {p.isAttendee ? (
-                            <Badge variant="outline" className="text-[10px]">
-                              attendee
-                            </Badge>
-                          ) : (
-                            <Badge variant="secondary" className="text-[10px]">
-                              buyer
-                            </Badge>
+                        <option value="">Assign to event…</option>
+                        {upcoming.map((e) => (
+                          <option key={e.slug} value={e.slug}>
+                            {e.city || e.slug}
+                          </option>
+                        ))}
+                      </select>
+                      <Button
+                        size="sm"
+                        onClick={handleBulkAssign}
+                        disabled={assigning || !assignTo || selectedIds.size === 0}
+                      >
+                        {assigning && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
+                        Assign to event
+                      </Button>
+                      {assignMsg && <span className="text-xs text-primary">{assignMsg}</span>}
+                    </div>
+                  )}
+
+                  <Card className="overflow-hidden">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          {isUnassigned && (
+                            <TableHead className="w-8">
+                              <input
+                                type="checkbox"
+                                className="accent-primary"
+                                aria-label="Select all"
+                                checked={
+                                  group.rows.some((r) => r.id) &&
+                                  group.rows.every((r) => !r.id || selectedIds.has(r.id))
+                                }
+                                onChange={() => toggleAll(group.rows)}
+                              />
+                            </TableHead>
                           )}
-                        </TableCell>
-                        <TableCell className="text-center font-medium">
-                          {p.isAttendee ? "—" : qty > 0 ? qty : "—"}
-                        </TableCell>
-                        <TableCell className="text-center">
-                          {p.isAttendee || qty === 0 ? (
-                            "—"
-                          ) : (
-                            <span
-                              className={
-                                remaining > 0
-                                  ? "font-semibold text-primary"
-                                  : "text-muted-foreground"
-                              }
+                          <TableHead>Name</TableHead>
+                          <TableHead>Email</TableHead>
+                          <TableHead>Phone</TableHead>
+                          <TableHead>Tier</TableHead>
+                          <TableHead>Type</TableHead>
+                          <TableHead className="text-center">Tickets Purchased</TableHead>
+                          <TableHead className="text-center">Unassigned Tickets</TableHead>
+                          <TableHead>Purchased On</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {group.rows.map((p) => {
+                          const qty = p.ticketQuantity || 0;
+                          // Buyer = 1 seat; remaining = total − buyer − attendees already added.
+                          const remaining =
+                            !p.isAttendee && qty > 0 ? Math.max(qty - 1 - p.attendeesAdded, 0) : 0;
+                          return (
+                            <TableRow
+                              key={p.id || p.email}
+                              className="cursor-pointer"
+                              onClick={() => setSelected(p)}
                             >
-                              {remaining}
-                            </span>
-                          )}
-                        </TableCell>
-                        <TableCell className="whitespace-nowrap text-muted-foreground">
-                          {formatPurchaseDate(p.dateAdded)}
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </Card>
-            </>
+                              {isUnassigned && (
+                                <TableCell onClick={(e) => e.stopPropagation()}>
+                                  <input
+                                    type="checkbox"
+                                    className="accent-primary"
+                                    checked={selectedIds.has(p.id)}
+                                    onChange={() => toggleSelected(p.id)}
+                                    disabled={!p.id}
+                                  />
+                                </TableCell>
+                              )}
+                              <TableCell className="font-medium">{p.name || "—"}</TableCell>
+                              <TableCell className="text-muted-foreground">
+                                {p.email || "—"}
+                              </TableCell>
+                              <TableCell className="text-muted-foreground">
+                                {p.phone || "—"}
+                              </TableCell>
+                              <TableCell>{p.tier || "—"}</TableCell>
+                              <TableCell>
+                                {p.isAttendee ? (
+                                  <Badge variant="outline" className="text-[10px]">
+                                    attendee
+                                  </Badge>
+                                ) : (
+                                  <Badge variant="secondary" className="text-[10px]">
+                                    buyer
+                                  </Badge>
+                                )}
+                              </TableCell>
+                              <TableCell className="text-center font-medium">
+                                {p.isAttendee ? "—" : qty > 0 ? qty : "—"}
+                              </TableCell>
+                              <TableCell className="text-center">
+                                {p.isAttendee || qty === 0 ? (
+                                  "—"
+                                ) : (
+                                  <span
+                                    className={
+                                      remaining > 0
+                                        ? "font-semibold text-primary"
+                                        : "text-muted-foreground"
+                                    }
+                                  >
+                                    {remaining}
+                                  </span>
+                                )}
+                              </TableCell>
+                              <TableCell className="whitespace-nowrap text-muted-foreground">
+                                {formatPurchaseDate(p.dateAdded)}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </Card>
+                </>
               );
             })()}
           </section>
@@ -990,11 +995,11 @@ function PurchaserDialog({
   }, [remaining, p?.id]);
 
   const setRow = (i: number, key: keyof NewAttendee, value: string) =>
-    setExtraAttendees((prev) =>
-      prev.map((a, idx) => (idx === i ? { ...a, [key]: value } : a)),
-    );
+    setExtraAttendees((prev) => prev.map((a, idx) => (idx === i ? { ...a, [key]: value } : a)));
   const addRow = () =>
-    setExtraAttendees((prev) => (prev.length >= remaining ? prev : [...prev, { ...emptyAttendee }]));
+    setExtraAttendees((prev) =>
+      prev.length >= remaining ? prev : [...prev, { ...emptyAttendee }],
+    );
   const removeRow = (i: number) =>
     setExtraAttendees((prev) => (prev.length === 1 ? prev : prev.filter((_, idx) => idx !== i)));
 
@@ -1079,7 +1084,7 @@ function PurchaserDialog({
                   <div className="mb-2 flex items-center justify-between">
                     <p className="text-sm font-semibold">Add additional attendees</p>
                     <p className="text-xs text-muted-foreground">
-                      {remaining} more attendee{remaining === 1 ? "" : "s"} needed
+                      {remaining} unassigned ticket{remaining === 1 ? "" : "s"}
                     </p>
                   </div>
                   <p className="mb-3 text-xs text-muted-foreground">

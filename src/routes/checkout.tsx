@@ -9,14 +9,14 @@ import { Label } from "@/components/ui/label";
 import {
   listGhlProducts,
   submitCheckoutToGhl,
-  getVipAvailability,
+  getEventAvailability,
   type GhlProduct,
   type GhlPrice,
-  type VipAvailability,
+  type EventAvailability,
 } from "@/lib/ghl.functions";
 import { listEvents } from "@/lib/events.functions";
 import { loadStoredEvents } from "@/lib/events.store";
-import { getTodayISO, splitEvents, type EventRow } from "@/lib/events";
+import { getTodayISO, splitEvents, isVipOffered, type EventRow } from "@/lib/events";
 import { normalizeCity } from "@/lib/city";
 import logo from "@/assets/hero-banner.webp";
 
@@ -29,7 +29,6 @@ export const Route = createFileRoute("/checkout")({
     email: typeof s.email === "string" ? s.email : undefined,
   }),
 
-
   head: () => ({
     meta: [
       { title: "Checkout — Scale & Profit Seminar" },
@@ -41,10 +40,8 @@ export const Route = createFileRoute("/checkout")({
       listEvents(),
       listGhlProducts(),
     ]);
-    const events =
-      eventsResult.status === "fulfilled" ? eventsResult.value : [];
-    const ghlProducts =
-      productsResult.status === "fulfilled" ? productsResult.value.products : [];
+    const events = eventsResult.status === "fulfilled" ? eventsResult.value : [];
+    const ghlProducts = productsResult.status === "fulfilled" ? productsResult.value.products : [];
     if (productsResult.status === "rejected") {
       console.warn(
         "[checkout loader] listGhlProducts failed, falling back to built-in pricing:",
@@ -78,7 +75,7 @@ const CITIES: Record<string, { name: string; date: string; venue: string; addres
   california: {
     name: "California",
     date: "December 8th–9th, 2026",
-    venue: "Venue TBA",
+    venue: "Venue TBD",
     address: "California",
   },
 };
@@ -198,7 +195,9 @@ function CheckoutPage() {
     /^\d{2}(\d{2})-(\d{2})-(\d{2})$/,
     "$1$2$3",
   );
-  const eventTagValue = eventYymmdd ? `🤝 s&p-${resolvedCity}-${eventYymmdd}` : `🤝 s&p-${resolvedCity}`;
+  const eventTagValue = eventYymmdd
+    ? `🤝 s&p-${resolvedCity}-${eventYymmdd}`
+    : `🤝 s&p-${resolvedCity}`;
 
   const cityInfo = cities[resolvedCity] ?? cities.boston ?? CITIES.boston;
   const isVip = tier === "vip";
@@ -218,16 +217,50 @@ function CheckoutPage() {
   const navigate = useNavigate();
   const submitToGhl = useServerFn(submitCheckoutToGhl);
 
-  // VIP ticket cap (e.g. Nashville = 20). Block VIP checkout once it's sold out.
-  const vipAvailFn = useServerFn(getVipAvailability);
-  const [vipAvail, setVipAvail] = useState<VipAvailability | null>(null);
+  // Live ticket caps (GA = 100, VIP = 20 per event), counted from the event tag.
+  // Block checkout for the chosen tier once it's sold out.
+  const availFn = useServerFn(getEventAvailability);
+  const [avail, setAvail] = useState<EventAvailability | null>(null);
+  const resolvedEndDate = events.find((e) => e.slug === resolvedCity)?.end_date;
   useEffect(() => {
     if (!resolvedCity) return;
-    vipAvailFn({ data: { city: resolvedCity } })
-      .then(setVipAvail)
-      .catch(() => setVipAvail(null));
-  }, [resolvedCity, vipAvailFn]);
-  const vipSoldOut = isVip && !!vipAvail?.limited && vipAvail.soldOut;
+    availFn({ data: { city: resolvedCity, endDate: resolvedEndDate } })
+      .then(setAvail)
+      .catch(() => setAvail(null));
+  }, [resolvedCity, resolvedEndDate, availFn]);
+
+  // VIP is hidden entirely for GA-only events (e.g. Nashville); this blocks
+  // immediately (config-based) regardless of counts. Sold-out gating fails open
+  // while availability is still loading.
+  const vipHidden = isVip && !isVipOffered(resolvedCity);
+  const tierSoldOut = isVip ? !!avail?.vip.soldOut : !!avail?.ga.soldOut;
+  const blockedInfo = useMemo(() => {
+    if (vipHidden) {
+      return {
+        title: `VIP isn't available for ${cityInfo.name}`,
+        body: "This event is General Admission only.",
+        switchTier: "ga" as const,
+      };
+    }
+    if (isVip && tierSoldOut) {
+      return {
+        title: `VIP is sold out for ${cityInfo.name}`,
+        body: "All VIP tickets for this event have been claimed. General Admission is still available.",
+        switchTier: "ga" as const,
+      };
+    }
+    if (!isVip && tierSoldOut) {
+      const vipOpen = isVipOffered(resolvedCity) && !avail?.vip.soldOut;
+      return {
+        title: `General Admission is sold out for ${cityInfo.name}`,
+        body: vipOpen
+          ? "All General Admission tickets have been claimed. The VIP Experience is still available."
+          : "All General Admission tickets for this event have been claimed.",
+        switchTier: (vipOpen ? "vip" : null) as "vip" | null,
+      };
+    }
+    return null;
+  }, [vipHidden, isVip, tierSoldOut, cityInfo.name, resolvedCity, avail]);
 
   // Two-step checkout: (1) questions, (2) payment. Name, email, phone, card and
   // quantity are all collected once inside the embedded GHL payment form.
@@ -310,7 +343,9 @@ function CheckoutPage() {
         let qty = 1;
         if (!isVip) {
           // 1) Explicit qty field if GHL sends one.
-          const qtyMatch = str.match(/"(?:qty|quantity|ticket[_-]?count|numberOfTickets)"\s*:\s*"?(\d+)/i);
+          const qtyMatch = str.match(
+            /"(?:qty|quantity|ticket[_-]?count|numberOfTickets)"\s*:\s*"?(\d+)/i,
+          );
           if (qtyMatch) {
             qty = Math.min(Math.max(parseInt(qtyMatch[1], 10), 1), 20);
           } else {
@@ -388,7 +423,18 @@ function CheckoutPage() {
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [step, navigate, resolvedCity, isVip, gaOptions, survey, total, cityInfo, events, submitToGhl]);
+  }, [
+    step,
+    navigate,
+    resolvedCity,
+    isVip,
+    gaOptions,
+    survey,
+    total,
+    cityInfo,
+    events,
+    submitToGhl,
+  ]);
 
   // Questions → Payment: validate the survey, then reveal the GHL payment form
   // (which collects name, email, phone, card and quantity in one place).
@@ -447,143 +493,156 @@ function CheckoutPage() {
           <div className="space-y-6">
             {/* Stepper */}
             <Card className="p-6">
-              <div className="mb-6 flex items-center gap-2 text-sm">
-                {[
-                  [1, "A Few Questions"],
-                  [2, "Payment"],
-                ].map(([n, label]) => (
-                  <div key={n} className="flex items-center gap-2">
-                    <span
-                      className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold ${
-                        step >= (n as number)
-                          ? "bg-primary text-primary-foreground"
-                          : "bg-muted text-muted-foreground"
-                      }`}
-                    >
-                      {n}
-                    </span>
-                    <span
-                      className={
-                        step === n ? "font-semibold text-foreground" : "text-muted-foreground"
-                      }
-                    >
-                      {label}
-                    </span>
-                    {n !== 2 && <span className="mx-2 h-px w-8 bg-border" />}
-                  </div>
-                ))}
-              </div>
-
-              <form onSubmit={(e) => e.preventDefault()} className="space-y-5" suppressHydrationWarning>
-                {step === 1 && (
-                  <>
-                    <p className="text-sm text-muted-foreground">
-                      A few quick questions before we finalize your order.
-                    </p>
-                    <Field label="Which state is your agency located in?">
-                      <Input
-                        required
-                        placeholder="Enter your state"
-                        value={survey.agencyState}
-                        onChange={(e) => setSurvey({ ...survey, agencyState: e.target.value })}
-                      />
-                    </Field>
-
-                    <div className="space-y-2">
-                      <Label className="text-xs uppercase tracking-wide text-muted-foreground">
-                        Do you have a MOA?
-                      </Label>
-                      <div className="flex flex-col gap-2">
-                        {["Yes", "No"].map((opt) => (
-                          <label key={opt} className="flex items-center gap-2 text-sm">
-                            <input
-                              type="radio"
-                              name="hasMoa"
-                              className="accent-primary"
-                              checked={survey.hasMoa === opt}
-                              onChange={() => setSurvey({ ...survey, hasMoa: opt })}
-                            />
-                            {opt}
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label className="text-xs uppercase tracking-wide text-muted-foreground">
-                        Have you attended a Scale + Profit seminar before?
-                      </Label>
-                      <div className="flex flex-col gap-2">
-                        {["Yes", "No"].map((opt) => (
-                          <label key={opt} className="flex items-center gap-2 text-sm">
-                            <input
-                              type="radio"
-                              name="attendedBefore"
-                              className="accent-primary"
-                              checked={survey.attendedBefore === opt}
-                              onChange={() => setSurvey({ ...survey, attendedBefore: opt })}
-                            />
-                            {opt}
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label className="text-xs uppercase tracking-wide text-muted-foreground">
-                        Scale & Profit Shirt Size
-                      </Label>
-                      <div className="flex flex-col gap-2">
-                        {SHIRT_SIZES.map((size) => (
-                          <label key={size} className="flex items-center gap-2 text-sm">
-                            <input
-                              type="radio"
-                              name="shirtSize"
-                              className="accent-primary"
-                              checked={survey.shirtSize === size}
-                              onChange={() => setSurvey({ ...survey, shirtSize: size })}
-                            />
-                            {size}
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-
-                    {surveyError && <p className="text-xs text-destructive">{surveyError}</p>}
-                    <Button type="button" className="w-full" onClick={goToPaymentFromSurvey}>
-                      Continue to Payment
+              {blockedInfo ? (
+                <div className="rounded-lg border border-border bg-muted/20 p-6 text-center">
+                  <p className="text-lg font-bold">{blockedInfo.title}</p>
+                  <p className="mt-2 text-sm text-muted-foreground">{blockedInfo.body}</p>
+                  {blockedInfo.switchTier && (
+                    <Button asChild className="mt-4" variant="outline">
+                      <Link
+                        to="/checkout"
+                        search={{ city: resolvedCity, tier: blockedInfo.switchTier }}
+                      >
+                        {blockedInfo.switchTier === "ga"
+                          ? "Switch to General Admission"
+                          : "Switch to VIP Experience"}
+                      </Link>
                     </Button>
-                  </>
-                )}
+                  )}
+                </div>
+              ) : (
+                <>
+                  <div className="mb-6 flex items-center gap-2 text-sm">
+                    {[
+                      [1, "A Few Questions"],
+                      [2, "Payment"],
+                    ].map(([n, label]) => (
+                      <div key={n} className="flex items-center gap-2">
+                        <span
+                          className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold ${
+                            step >= (n as number)
+                              ? "bg-primary text-primary-foreground"
+                              : "bg-muted text-muted-foreground"
+                          }`}
+                        >
+                          {n}
+                        </span>
+                        <span
+                          className={
+                            step === n ? "font-semibold text-foreground" : "text-muted-foreground"
+                          }
+                        >
+                          {label}
+                        </span>
+                        {n !== 2 && <span className="mx-2 h-px w-8 bg-border" />}
+                      </div>
+                    ))}
+                  </div>
 
-                {step === 2 && (
-                  <>
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <h3 className="text-lg font-bold">Complete Your Payment</h3>
-                        <p className="text-sm text-muted-foreground">
-                          Enter your details and pay securely below to confirm your seat.
-                        </p>
-                      </div>
-                      <Button type="button" variant="outline" size="sm" onClick={() => setStep(1)}>
-                        Back
-                      </Button>
-                    </div>
-                    {vipSoldOut ? (
-                      <div className="rounded-lg border border-border bg-muted/20 p-6 text-center">
-                        <p className="text-lg font-bold">VIP is sold out for {cityInfo.name}</p>
-                        <p className="mt-2 text-sm text-muted-foreground">
-                          All VIP tickets for this event have been claimed. General Admission is
-                          still available.
-                        </p>
-                        <Button asChild className="mt-4" variant="outline">
-                          <Link to="/checkout" search={{ city: resolvedCity, tier: "ga" }}>
-                            Switch to General Admission
-                          </Link>
-                        </Button>
-                      </div>
-                    ) : (
+                  <form
+                    onSubmit={(e) => e.preventDefault()}
+                    className="space-y-5"
+                    suppressHydrationWarning
+                  >
+                    {step === 1 && (
                       <>
+                        <p className="text-sm text-muted-foreground">
+                          A few quick questions before we finalize your order.
+                        </p>
+                        <Field label="Which state is your agency located in?">
+                          <Input
+                            required
+                            placeholder="Enter your state"
+                            value={survey.agencyState}
+                            onChange={(e) => setSurvey({ ...survey, agencyState: e.target.value })}
+                          />
+                        </Field>
+
+                        <div className="space-y-2">
+                          <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+                            Do you have a MOA?
+                          </Label>
+                          <div className="flex flex-col gap-2">
+                            {["Yes", "No"].map((opt) => (
+                              <label key={opt} className="flex items-center gap-2 text-sm">
+                                <input
+                                  type="radio"
+                                  name="hasMoa"
+                                  className="accent-primary"
+                                  checked={survey.hasMoa === opt}
+                                  onChange={() => setSurvey({ ...survey, hasMoa: opt })}
+                                />
+                                {opt}
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+                            Have you attended a Scale + Profit seminar before?
+                          </Label>
+                          <div className="flex flex-col gap-2">
+                            {["Yes", "No"].map((opt) => (
+                              <label key={opt} className="flex items-center gap-2 text-sm">
+                                <input
+                                  type="radio"
+                                  name="attendedBefore"
+                                  className="accent-primary"
+                                  checked={survey.attendedBefore === opt}
+                                  onChange={() => setSurvey({ ...survey, attendedBefore: opt })}
+                                />
+                                {opt}
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+                            Scale & Profit Shirt Size
+                          </Label>
+                          <div className="flex flex-col gap-2">
+                            {SHIRT_SIZES.map((size) => (
+                              <label key={size} className="flex items-center gap-2 text-sm">
+                                <input
+                                  type="radio"
+                                  name="shirtSize"
+                                  className="accent-primary"
+                                  checked={survey.shirtSize === size}
+                                  onChange={() => setSurvey({ ...survey, shirtSize: size })}
+                                />
+                                {size}
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+
+                        {surveyError && <p className="text-xs text-destructive">{surveyError}</p>}
+                        <Button type="button" className="w-full" onClick={goToPaymentFromSurvey}>
+                          Continue to Payment
+                        </Button>
+                      </>
+                    )}
+
+                    {step === 2 && (
+                      <>
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <h3 className="text-lg font-bold">Complete Your Payment</h3>
+                            <p className="text-sm text-muted-foreground">
+                              Enter your details and pay securely below to confirm your seat.
+                            </p>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setStep(1)}
+                          >
+                            Back
+                          </Button>
+                        </div>
                         <div className="overflow-hidden rounded-lg bg-white">
                           <iframe
                             src={paymentSrc}
@@ -597,13 +656,14 @@ function CheckoutPage() {
                           />
                         </div>
                         <p className="flex items-center justify-center gap-2 text-center text-xs text-muted-foreground">
-                          <ShieldCheck className="h-4 w-4 text-primary" /> 100% Secure & Safe Payments
+                          <ShieldCheck className="h-4 w-4 text-primary" /> 100% Secure & Safe
+                          Payments
                         </p>
                       </>
                     )}
-                  </>
-                )}
-              </form>
+                  </form>
+                </>
+              )}
             </Card>
           </div>
 
@@ -670,4 +730,3 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     </div>
   );
 }
-
