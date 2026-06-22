@@ -38,12 +38,14 @@ import {
   listSeminarPurchasers,
   getPurchaserDetail,
   addAttendeesToGhl,
+  revokeAttendeeFromBuyer,
   assignContactsToEvent,
   TIER_LIMITS,
   type SeminarPurchaser,
   type PurchaserDetail,
+  type AttendeeRecord,
 } from "@/lib/ghl.functions";
-import { getTodayISO, splitEvents, type EventRow } from "@/lib/events";
+import { getTodayISO, splitEvents, isVipOffered, type EventRow } from "@/lib/events";
 import { loadStoredEvents, saveStoredEvents } from "@/lib/events.store";
 
 export const Route = createFileRoute("/admin")({
@@ -729,11 +731,15 @@ function PurchasesView({
 
                   {!isUnassigned &&
                     (() => {
-                      // Seats sold per tier, counted from the event-tagged contacts in
-                      // this group — VIP = VIP-tier contacts; GA = everyone else (GA
-                      // buyers + attendees). Mirrors the public availability counts.
-                      const vipSold = group.rows.filter((r) => r.tier === "VIP").length;
-                      const gaSold = group.rows.length - vipSold;
+                      // Seats sold per tier = number of event-tagged contacts in
+                      // this cohort. VIP = VIP-tier contacts; GA = everyone else
+                      // (GA buyers + attendees, since VIP is single-seat). A
+                      // GA-only cohort (e.g. Nashville) has no VIP inventory, so
+                      // its VIP tier is shown sold out.
+                      const vipHidden = !isVipOffered(group.slug);
+                      const vipCount = group.rows.filter((r) => r.tier === "VIP").length;
+                      const gaSold = group.rows.length - vipCount;
+                      const vipSold = vipHidden ? TIER_LIMITS.vip : vipCount;
                       const tiers: Array<{ label: string; sold: number; limit: number }> = [
                         { label: "GA", sold: gaSold, limit: TIER_LIMITS.ga },
                         { label: "VIP", sold: vipSold, limit: TIER_LIMITS.vip },
@@ -932,6 +938,7 @@ function PurchaserDialog({
   const p = purchaser;
   const detailFn = useServerFn(getPurchaserDetail);
   const addAttendeesFn = useServerFn(addAttendeesToGhl);
+  const revokeAttendeeFn = useServerFn(revokeAttendeeFromBuyer);
   const [detail, setDetail] = useState<PurchaserDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
@@ -940,8 +947,14 @@ function PurchaserDialog({
   const emptyAttendee: NewAttendee = { firstName: "", lastName: "", email: "" };
   const [extraAttendees, setExtraAttendees] = useState<NewAttendee[]>([{ ...emptyAttendee }]);
   const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(0);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // Registered attendees + the running added-count, kept in local state so the
+  // UI updates as the admin adds / revokes without a full reload.
+  const [attendees, setAttendees] = useState<AttendeeRecord[]>([]);
+  const [addedCount, setAddedCount] = useState(0);
+  const [savedMsg, setSavedMsg] = useState<string | null>(null);
+  const [revokingId, setRevokingId] = useState<string | null>(null);
+  const [revokeError, setRevokeError] = useState<string | null>(null);
 
   // Fetch the contact's custom fields when a row is opened (GHL's search
   // endpoint omits them, so this needs a per-contact call).
@@ -955,11 +968,18 @@ function PurchaserDialog({
     setDetail(null);
     setDetailError(null);
     setExtraAttendees([{ ...emptyAttendee }]);
-    setSaved(0);
+    setSavedMsg(null);
     setSaveError(null);
+    setRevokeError(null);
+    setAttendees([]);
+    setAddedCount(0);
     detailFn({ data: { password, contactId: p.id } })
       .then((res) => {
-        if (!cancelled) setDetail(res);
+        if (!cancelled) {
+          setDetail(res);
+          setAttendees(res.attendees ?? []);
+          setAddedCount(res.attendeesAdded ?? 0);
+        }
       })
       .catch((err) => {
         if (!cancelled)
@@ -989,9 +1009,8 @@ function PurchaserDialog({
   // register. Each saved attendee this session decrements what's left to add.
   const ticketQty = detail && detail.ticketQuantity > 0 ? detail.ticketQuantity : null;
   const additionalNeeded = ticketQty && ticketQty > 1 ? ticketQty - 1 : 0;
-  // Persisted count (from GHL) plus anything added in this open session.
-  const alreadyAdded = (detail?.attendeesAdded ?? 0) + saved;
-  const remaining = Math.max(additionalNeeded - alreadyAdded, 0);
+  // Current registered count (updated live as the admin adds / revokes).
+  const remaining = Math.max(additionalNeeded - addedCount, 0);
 
   // Auto-size attendee rows to match how many more guests still need to be added.
   useEffect(() => {
@@ -1038,13 +1057,39 @@ function PurchaserDialog({
           buyerContactId: p.id || undefined,
         },
       });
-      setSaved((prev) => prev + res.saved);
+      setAddedCount((c) => c + res.saved);
+      setAttendees((prev) => [...prev, ...res.attendees]);
+      setSavedMsg(`Saved ${res.saved} attendee${res.saved === 1 ? "" : "s"}.`);
       if (res.failed > 0) setSaveError(`${res.failed} attendee(s) failed to save.`);
       setExtraAttendees([{ ...emptyAttendee }]);
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "Failed to add attendees.");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleRevoke = async (attendeeId: string) => {
+    if (!p?.id) return;
+    setRevokeError(null);
+    setRevokingId(attendeeId);
+    try {
+      const res = await revokeAttendeeFn({
+        data: {
+          password,
+          buyerContactId: p.id,
+          attendeeId,
+          city: p.eventSlug || "boston",
+          tier: p.tier === "VIP" ? "vip" : "ga",
+        },
+      });
+      setAttendees((prev) => prev.filter((a) => a.id !== attendeeId));
+      setAddedCount(res.attendeesAdded);
+      setSavedMsg(null);
+    } catch (err) {
+      setRevokeError(err instanceof Error ? err.message : "Failed to revoke attendee.");
+    } finally {
+      setRevokingId(null);
     }
   };
 
@@ -1080,6 +1125,42 @@ function PurchaserDialog({
                   <p className="text-xl font-bold text-primary">{loading ? "…" : remaining}</p>
                 </div>
               </div>
+
+              {/* Registered attendees — each can be revoked, freeing its slot so
+                  the ticket can be reassigned to someone else. */}
+              {!p.isAttendee && attendees.length > 0 && (
+                <div className="rounded-lg border border-border p-4">
+                  <p className="mb-2 text-sm font-semibold">Assigned attendees</p>
+                  <div className="space-y-2">
+                    {attendees.map((a) => (
+                      <div
+                        key={a.id}
+                        className="flex items-center justify-between gap-2 rounded-md border border-border/60 p-2.5"
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium">
+                            {[a.firstName, a.lastName].filter(Boolean).join(" ") ||
+                              a.email ||
+                              "Attendee"}
+                          </p>
+                          {a.email && (
+                            <p className="truncate text-xs text-muted-foreground">{a.email}</p>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleRevoke(a.id)}
+                          disabled={revokingId === a.id}
+                          className="shrink-0 text-xs font-medium text-destructive hover:underline disabled:opacity-50"
+                        >
+                          {revokingId === a.id ? "Revoking…" : "Revoke"}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  {revokeError && <p className="mt-2 text-xs text-destructive">{revokeError}</p>}
+                </div>
+              )}
 
               {/* Add attendees — only when there are extra seats still to register.
                   Single-ticket buyers (and fully-registered ones) get no form. */}
@@ -1156,10 +1237,8 @@ function PurchaserDialog({
                       )}
                       {saving ? "Saving…" : "Save attendees"}
                     </Button>
-                    {saved > 0 && !saving && (
-                      <span className="text-xs text-primary">
-                        Saved {saved} attendee{saved === 1 ? "" : "s"}.
-                      </span>
+                    {savedMsg && !saving && (
+                      <span className="text-xs text-primary">{savedMsg}</span>
                     )}
                   </div>
                   {saveError && <p className="mt-2 text-xs text-destructive">{saveError}</p>}

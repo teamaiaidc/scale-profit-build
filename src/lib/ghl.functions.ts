@@ -59,6 +59,10 @@ const FIELD_KEYS = {
   // so "tickets to add remaining" persists across reloads. (Create this contact
   // custom field in GHL — number — for persistence; absent → treated as 0.)
   attendeesAdded: "sp_attendees_added",
+  // JSON list of the attendees registered for a buyer ({id,firstName,lastName,
+  // email}), so the admin can see and individually REVOKE them. (Create this
+  // contact custom field in GHL — large/multi-line text; absent → empty list.)
+  attendeesList: "sp_attendees",
 } as const;
 
 // GHL *opportunity* custom-field keys (separate object/namespace from contact
@@ -811,6 +815,65 @@ export const listGhlProducts = createServerFn({ method: "GET" }).handler(
 
 // ============== Post-purchase attendees ==============
 
+// One registered attendee belonging to a buyer. Persisted as a JSON list in the
+// buyer's sp_attendees field so the admin can list + revoke them individually.
+export type AttendeeRecord = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+};
+
+// Parse the buyer's sp_attendees JSON, tolerating empty/garbage values.
+function parseAttendeeList(raw: string): AttendeeRecord[] {
+  if (!raw.trim()) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((a) => a && typeof a === "object")
+      .map((a: Record<string, unknown>) => ({
+        id: String(a.id ?? ""),
+        firstName: String(a.firstName ?? ""),
+        lastName: String(a.lastName ?? ""),
+        email: String(a.email ?? ""),
+      }))
+      .filter((a) => a.id);
+  } catch {
+    return [];
+  }
+}
+
+// Read a buyer's persisted attendee list + running count from their contact.
+async function readBuyerAttendeeList(
+  contactId: string,
+): Promise<{ list: AttendeeRecord[]; count: number }> {
+  if (!contactId) return { list: [], count: 0 };
+  try {
+    const fieldMeta = await getFieldMeta();
+    const res = (await ghlFetch(`/contacts/${contactId}`, { method: "GET" })) as {
+      contact?: { customFields?: Array<{ id?: string; value?: unknown; field_value?: unknown }> };
+    };
+    const valueOf = (key: string) => {
+      for (const f of res.contact?.customFields ?? []) {
+        if (f.id && fieldMeta.get(f.id)?.key === key) {
+          const v = f.value ?? f.field_value ?? "";
+          return Array.isArray(v) ? v.join(", ") : String(v);
+        }
+      }
+      return "";
+    };
+    const count = Number.parseInt(valueOf(FIELD_KEYS.attendeesAdded), 10);
+    return {
+      list: parseAttendeeList(valueOf(FIELD_KEYS.attendeesList)),
+      count: Number.isFinite(count) && count > 0 ? count : 0,
+    };
+  } catch (err) {
+    console.warn("GHL buyer attendee-list read failed:", (err as Error).message);
+    return { list: [], count: 0 };
+  }
+}
+
 // Each ticket becomes its own attendee contact, collected on the confirmation
 // page after payment (when the real ticket count is known).
 const addAttendeesSchema = z.object({
@@ -834,45 +897,103 @@ export const addAttendeesToGhl = createServerFn({ method: "POST" })
     // One centralized tag (🤝 s&p-{tier}-{city}-{yymmdd}) — same as the buyer.
     // Buyer-vs-attendee is told apart by the contact `source`, not a tag.
     const tags = [eventTag(data.tier, data.city, data.endDate)];
+    const toAdd = data.attendees.filter((a) => a.email);
     const results = await Promise.allSettled(
-      data.attendees
-        .filter((a) => a.email)
-        .map((a) =>
-          ghlFetch("/contacts/upsert", {
-            method: "POST",
-            body: JSON.stringify({
-              locationId: GHL_LOCATION_ID,
-              firstName: a.firstName,
-              lastName: a.lastName,
-              email: a.email,
-              tags,
-              source: "Scale & Profit Seminar Attendee",
-            }),
+      toAdd.map((a) =>
+        ghlFetch("/contacts/upsert", {
+          method: "POST",
+          body: JSON.stringify({
+            locationId: GHL_LOCATION_ID,
+            firstName: a.firstName,
+            lastName: a.lastName,
+            email: a.email,
+            tags,
+            source: "Scale & Profit Seminar Attendee",
           }),
-        ),
+        }),
+      ),
     );
-    const saved = results.filter((r) => r.status === "fulfilled").length;
+    // Capture each saved attendee WITH its GHL contact id, so the buyer can track
+    // exactly who was registered and the admin can revoke a specific one later.
+    const savedAttendees: AttendeeRecord[] = [];
+    results.forEach((r, i) => {
+      if (r.status !== "fulfilled") return;
+      const body = r.value as { contact?: { id?: string }; id?: string };
+      const id = body.contact?.id ?? body.id ?? "";
+      const a = toAdd[i];
+      if (id) savedAttendees.push({ id, ...a });
+    });
+    const saved = savedAttendees.length;
     const failed = results.length - saved;
 
-    // Persist the running added-count on the buyer so the "remaining" counter
-    // survives reloads. Best-effort: skipped silently if the field/contact is
-    // missing. (Requires the sp_attendees_added contact field to exist in GHL.)
+    // Persist the attendee list + running count on the buyer so the "unassigned
+    // tickets" counter survives reloads AND the admin can revoke a specific
+    // attendee later. Best-effort: skipped silently if the field/contact is
+    // missing. (Requires the sp_attendees_added [number] + sp_attendees [text]
+    // contact fields to exist in GHL.)
     if (data.buyerContactId && saved > 0) {
       try {
-        const { attendeesAdded } = await resolveBuyerCounts(data.buyerContactId);
+        const existing = await readBuyerAttendeeList(data.buyerContactId);
+        const list = [...existing.list, ...savedAttendees];
         await ghlFetch(`/contacts/${data.buyerContactId}`, {
           method: "PUT",
           body: JSON.stringify({
             customFields: [
-              { key: FIELD_KEYS.attendeesAdded, field_value: String(attendeesAdded + saved) },
+              { key: FIELD_KEYS.attendeesAdded, field_value: String(existing.count + saved) },
+              { key: FIELD_KEYS.attendeesList, field_value: JSON.stringify(list) },
             ],
           }),
         });
       } catch (err) {
-        console.warn("GHL attendees-added increment failed:", (err as Error).message);
+        console.warn("GHL attendees-added update failed:", (err as Error).message);
       }
     }
-    return { ok: failed === 0, saved, failed };
+    return { ok: failed === 0, saved, failed, attendees: savedAttendees };
+  });
+
+const revokeAttendeeSchema = z.object({
+  password: z.string().min(1).max(200),
+  buyerContactId: z.string().min(1).max(100),
+  attendeeId: z.string().min(1).max(100),
+  city: z.string().min(1).max(50),
+  // ISO end date (YYYY-MM-DD); falls back to the slug's default if omitted.
+  endDate: z.string().max(20).optional(),
+  tier: z.enum(["ga", "vip"]).optional(),
+});
+
+// Revoke a previously-registered attendee from a buyer: removes the event tag
+// from the attendee (so they no longer count as a seat — the contact itself is
+// kept) and drops them from the buyer's attendee list + decrements the count,
+// freeing the slot to reassign. Admin-gated.
+export const revokeAttendeeFromBuyer = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) => revokeAttendeeSchema.parse(d))
+  .handler(async ({ data }) => {
+    assertAdmin(data.password);
+    // 1. Remove the event tag from the attendee (keep the contact).
+    const tag = eventTag(data.tier ?? "ga", data.city, data.endDate);
+    try {
+      await ghlFetch(`/contacts/${data.attendeeId}/tags`, {
+        method: "DELETE",
+        body: JSON.stringify({ tags: [tag] }),
+      });
+    } catch (err) {
+      console.warn("GHL attendee untag failed:", (err as Error).message);
+    }
+    // 2. Drop the attendee from the buyer's list + decrement the count.
+    const { list, count } = await readBuyerAttendeeList(data.buyerContactId);
+    const nextList = list.filter((a) => a.id !== data.attendeeId);
+    const removed = nextList.length < list.length;
+    const nextCount = Math.max(count - (removed ? 1 : 0), 0);
+    await ghlFetch(`/contacts/${data.buyerContactId}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        customFields: [
+          { key: FIELD_KEYS.attendeesAdded, field_value: String(nextCount) },
+          { key: FIELD_KEYS.attendeesList, field_value: JSON.stringify(nextList) },
+        ],
+      }),
+    });
+    return { ok: true, attendeesAdded: nextCount };
   });
 
 // ============== Admin: purchasers / attendees ==============
@@ -918,6 +1039,7 @@ export type PurchaserDetail = {
   // Real ticket count if the payment form has populated the field; else 0.
   ticketQuantity: number;
   attendeesAdded: number; // additional attendees already registered for this buyer
+  attendees: AttendeeRecord[]; // the registered attendees (revocable individually)
   answers: {
     agencyState: string;
     hasMoa: string;
@@ -1310,6 +1432,7 @@ export const getPurchaserDetail = createServerFn({ method: "POST" })
     return {
       ticketQuantity: Number.isFinite(contactQty) && contactQty > 0 ? contactQty : oppTickets,
       attendeesAdded: Number.isFinite(attendeesAdded) && attendeesAdded > 0 ? attendeesAdded : 0,
+      attendees: parseAttendeeList(valueOf(FIELD_KEYS.attendeesList)),
       answers: {
         // Agency state lives in the native contact State field.
         agencyState: c.state ?? "",
