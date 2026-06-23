@@ -686,16 +686,20 @@ function CheckoutPage() {
                 <p className="text-xs uppercase tracking-wider text-muted-foreground">
                   {isVip ? "VIP Experience" : "General Admission"}
                 </p>
-                <p className="mt-1 text-3xl font-black text-primary">
-                  $
-                  {(isVip
-                    ? (live.vip ?? 1600)
-                    : (gaOptions.find((g) => g.qty === 1)?.price ?? gaOptions[0].price)
-                  ).toLocaleString()}
-                </p>
-                {isVip && (
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                    Limited Seats Available
+                {isVip ? (
+                  <>
+                    <p className="mt-1 text-3xl font-black text-primary">
+                      ${(live.vip ?? 1600).toLocaleString()}
+                    </p>
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                      Limited Seats Available
+                    </p>
+                  </>
+                ) : (
+                  // GA has several ticket packages chosen inside the payment form,
+                  // so we don't show a fixed price here (it would be misleading).
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Choose your ticket package at payment.
                   </p>
                 )}
               </div>
@@ -709,24 +713,33 @@ function CheckoutPage() {
               </ul>
             </Card>
 
-            <Card className="p-6">
-              <h3 className="font-bold">Order Summary</h3>
-              <div className="mt-4 space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span>{selected.label}</span>
-                  <span>${selected.price.toLocaleString()}.00</span>
+            {/* Order summary with pricing only for VIP (one fixed price). GA's
+                price depends on the package picked in the payment form, so we
+                don't show a (misleading) total here. */}
+            {isVip ? (
+              <Card className="p-6">
+                <h3 className="font-bold">Order Summary</h3>
+                <div className="mt-4 space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span>{selected.label}</span>
+                    <span>${selected.price.toLocaleString()}.00</span>
+                  </div>
                 </div>
-              </div>
-              <div className="mt-4 flex items-center justify-between border-t border-border pt-4">
-                <span className="font-bold">Order Total</span>
-                <span className="text-xl font-black text-primary">
-                  ${total.toLocaleString()}.00
-                </span>
-              </div>
-              <p className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
-                <ShieldCheck className="h-4 w-4 text-primary" /> * 100% Secure & Safe Payments *
+                <div className="mt-4 flex items-center justify-between border-t border-border pt-4">
+                  <span className="font-bold">Order Total</span>
+                  <span className="text-xl font-black text-primary">
+                    ${total.toLocaleString()}.00
+                  </span>
+                </div>
+                <p className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+                  <ShieldCheck className="h-4 w-4 text-primary" /> * 100% Secure & Safe Payments *
+                </p>
+              </Card>
+            ) : (
+              <p className="flex items-center justify-center gap-2 text-center text-xs text-muted-foreground">
+                <ShieldCheck className="h-4 w-4 text-primary" /> 100% Secure & Safe Payments
               </p>
-            </Card>
+            )}
           </aside>
         </div>
       </div>
