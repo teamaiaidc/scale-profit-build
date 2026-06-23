@@ -1372,11 +1372,19 @@ export const listSeminarPurchasers = createServerFn({ method: "POST" })
             attendeesAdded: 0,
           })),
         ]);
+        // VIP is a single-seat ticket — never multi. Force qty 1 (and 0 added)
+        // so a VIP buyer never shows a multi-ticket count or unassigned seats,
+        // even if a stale ticket-quantity field/order says otherwise.
+        const isVipBuyer = row.tier === "VIP";
         return {
           ...row,
           amount: paid > 0 ? paid : row.amount,
-          ticketQuantity: counts.ticketQuantity > 0 ? counts.ticketQuantity : row.ticketQuantity,
-          attendeesAdded: counts.attendeesAdded,
+          ticketQuantity: isVipBuyer
+            ? 1
+            : counts.ticketQuantity > 0
+              ? counts.ticketQuantity
+              : row.ticketQuantity,
+          attendeesAdded: isVipBuyer ? 0 : counts.attendeesAdded,
         };
       });
     } catch (err) {

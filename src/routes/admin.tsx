@@ -586,13 +586,18 @@ function PurchasesView({
       p.tags.some((t) => t.toLowerCase().includes(q))
     );
   });
-  const groups = purchasers ? groupByEvent(filtered, events) : [];
-  // Totals reflect only event-tagged purchasers (i.e. what's shown), so the
-  // numbers stay consistent with the per-event tables.
-  const tagged = (purchasers ?? []).filter((p) => p.eventSlug);
-  const totalPeople = tagged.length;
-  const totalBuyers = tagged.filter((p) => !p.isAttendee).length;
-  const totalAttendees = tagged.filter((p) => p.isAttendee).length;
+  // Only current/upcoming cohorts are shown — past events (e.g. Boston) are
+  // hidden so the dashboard reflects who's coming to live events.
+  const upcomingSlugs = new Set(splitEvents(events, getTodayISO()).upcoming.map((e) => e.slug));
+  const groups = purchasers
+    ? groupByEvent(filtered, events).filter((g) => upcomingSlugs.has(g.slug))
+    : [];
+  // Totals reflect the upcoming-event purchasers shown, so the numbers stay
+  // consistent with the per-event tables.
+  const upcomingPurchasers = (purchasers ?? []).filter((p) => upcomingSlugs.has(p.eventSlug));
+  const totalPeople = upcomingPurchasers.length;
+  const totalBuyers = upcomingPurchasers.filter((p) => !p.isAttendee).length;
+  const totalAttendees = upcomingPurchasers.filter((p) => p.isAttendee).length;
 
   return (
     <div>
@@ -863,7 +868,14 @@ function PurchaserDialog({
   // Tickets purchased comes from {{contact.sp_no_of_ticket_purchased}} (resolved
   // server-side). The buyer holds 1 seat; the rest are additional attendees to
   // register. Each saved attendee this session decrements what's left to add.
-  const ticketQty = detail && detail.ticketQuantity > 0 ? detail.ticketQuantity : null;
+  // VIP is single-seat — always 1 ticket, no additional attendees to register,
+  // regardless of any stale multi-ticket value on the contact.
+  const isVipBuyer = p?.tier === "VIP";
+  const ticketQty = isVipBuyer
+    ? 1
+    : detail && detail.ticketQuantity > 0
+      ? detail.ticketQuantity
+      : null;
   const additionalNeeded = ticketQty && ticketQty > 1 ? ticketQty - 1 : 0;
   // Current registered count (updated live as the admin adds / revokes).
   const remaining = Math.max(additionalNeeded - addedCount, 0);
