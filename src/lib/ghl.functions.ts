@@ -1292,13 +1292,12 @@ export const listSeminarPurchasers = createServerFn({ method: "POST" })
     }
 
     // GHL's tag-search can't reliably match the 🤝 emoji tag, so also page through
-    // contacts and keep any that are Scale & Profit purchasers — identified by an
-    // S&P tag OR by the source of the checkout forms (S&P-GenAd / S&P-vip / "Scale
-    // & Profit …"). Source-matching catches purchases that weren't auto-tagged;
-    // they show under "Unassigned" until the admin assigns them to an event.
+    // contacts and keep any that carry a Scale & Profit event tag (the emoji tag
+    // contains "s&p-", or a legacy "scale-profit-…" tag). We intentionally do NOT
+    // include source-only matches: only people who actually purchased (tagged on
+    // checkout) or were added by the admin (tagged attendees) belong here.
     // Bounded so a large location can't time out the worker.
     const SP_TAG_RE = /s&p-|scale-profit/i;
-    const SP_SOURCE_RE = /s&p|scale.?profit/i;
     try {
       for (let page = 1; page <= 30; page++) {
         const res = (await ghlFetch("/contacts/search", {
@@ -1309,8 +1308,7 @@ export const listSeminarPurchasers = createServerFn({ method: "POST" })
         const batch = res.contacts ?? [];
         for (const c of batch) {
           const tags = (c.tags ?? []).map((t) => String(t));
-          const isSp = tags.some((t) => SP_TAG_RE.test(t)) || SP_SOURCE_RE.test(c.source ?? "");
-          if (!isSp) continue;
+          if (!tags.some((t) => SP_TAG_RE.test(t))) continue;
           const id = String(c.id ?? c.contactId ?? "");
           if (id) byId.set(id, c);
         }
@@ -1320,7 +1318,13 @@ export const listSeminarPurchasers = createServerFn({ method: "POST" })
       console.warn("GHL broad contact scan failed:", (err as Error).message);
     }
 
-    const rawContacts = [...byId.values()];
+    // Only contacts whose tag resolves to a specific event are shown — buyers
+    // (tagged on purchase) and admin-added attendees. Anything else (e.g. an
+    // umbrella-only legacy tag, or a stray source match) is dropped so the
+    // dashboard shows purchasers + admin-added attendees, grouped by event.
+    const rawContacts = [...byId.values()].filter(
+      (c) => deriveEventSlug((c.tags ?? []).map((t) => String(t))) !== "",
+    );
 
     // Base row built from the search result alone — no extra GHL calls, so these
     // ALWAYS render even if the per-buyer enrichment below fails or times out.
