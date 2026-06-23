@@ -18,6 +18,7 @@ import { listEvents } from "@/lib/events.functions";
 import { loadStoredEvents } from "@/lib/events.store";
 import { getTodayISO, splitEvents, isVipOffered, type EventRow } from "@/lib/events";
 import { normalizeCity } from "@/lib/city";
+import { US_STATES, normalizeUsState } from "@/lib/us-states";
 import logo from "@/assets/hero-banner.webp";
 
 type Search = { city?: string; tier?: string; email?: string };
@@ -442,11 +443,20 @@ function CheckoutPage() {
       setSurveyError("Please answer all questions before continuing.");
       return;
     }
+    // Verify the agency state is a real U.S. state (full name or 2-letter code),
+    // and normalize it to the canonical state name before saving.
+    const stateName = normalizeUsState(survey.agencyState);
+    if (!stateName) {
+      setSurveyError('Please enter a valid U.S. state (e.g. "TX" or "Texas").');
+      return;
+    }
     setSurveyError(null);
+    const finalSurvey = { ...survey, agencyState: stateName };
+    setSurvey(finalSurvey);
     // Bridge the survey to the confirmation page (same browser) so it can be
     // saved to the contact once GHL redirects there with the buyer's email.
     try {
-      window.localStorage.setItem("sp-pending-survey", JSON.stringify(survey));
+      window.localStorage.setItem("sp-pending-survey", JSON.stringify(finalSurvey));
     } catch {
       /* ignore private-mode / quota errors */
     }
@@ -457,11 +467,12 @@ function CheckoutPage() {
     <div className="min-h-screen bg-background text-foreground">
       <header className="border-b border-border bg-background/85 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-          <Link to="/" className="flex items-center gap-2">
+          <Link to="/" hash="hero" className="flex items-center gap-2">
             <img src={logo} alt="Scale & Profit" className="h-10 w-auto" />
           </Link>
           <Link
             to="/"
+            hash="hero"
             className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
           >
             <ArrowLeft className="h-4 w-4" /> Back to event
@@ -546,10 +557,17 @@ function CheckoutPage() {
                         <Field label="Which state is your agency located in?">
                           <Input
                             required
-                            placeholder="Enter your state"
+                            list="us-states"
+                            autoComplete="address-level1"
+                            placeholder='State (e.g. "TX" or "Texas")'
                             value={survey.agencyState}
                             onChange={(e) => setSurvey({ ...survey, agencyState: e.target.value })}
                           />
+                          <datalist id="us-states">
+                            {US_STATES.map((s) => (
+                              <option key={s.abbr} value={s.name} />
+                            ))}
+                          </datalist>
                         </Field>
 
                         <div className="space-y-2">

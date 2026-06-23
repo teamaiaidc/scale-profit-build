@@ -39,7 +39,6 @@ import {
   getPurchaserDetail,
   addAttendeesToGhl,
   revokeAttendeeFromBuyer,
-  assignContactsToEvent,
   TIER_LIMITS,
   type SeminarPurchaser,
   type PurchaserDetail,
@@ -523,25 +522,18 @@ type EventGroup = {
   attendees: SeminarPurchaser[];
 };
 
-function groupByEvent(
-  purchasers: SeminarPurchaser[],
-  events: EventRow[],
-  recentCutoff?: string,
-): EventGroup[] {
+function groupByEvent(purchasers: SeminarPurchaser[], events: EventRow[]): EventGroup[] {
   const nameBySlug = new Map(events.map((e) => [e.slug, e.city || e.slug]));
   const order = events.map((e) => e.slug);
   const buckets = new Map<string, SeminarPurchaser[]>();
   for (const p of purchasers) {
-    const slug = p.eventSlug || "unknown";
-    // The "unknown" (Unassigned) bucket is for untagged buyers we can't place.
-    // Only keep ones bought for an active/upcoming event — i.e. added after the
-    // most recent past event ended — so stale past-event contacts don't show.
-    if (slug === "unknown" && recentCutoff && p.dateAdded && p.dateAdded < recentCutoff) {
-      continue;
-    }
-    const list = buckets.get(slug) ?? [];
+    // Only show event-tagged purchasers, grouped under their event — untagged
+    // contacts are skipped entirely (no "Unassigned" bucket). Buyers are tagged
+    // to their event on purchase, so this is where they belong.
+    if (!p.eventSlug) continue;
+    const list = buckets.get(p.eventSlug) ?? [];
     list.push(p);
-    buckets.set(slug, list);
+    buckets.set(p.eventSlug, list);
   }
   return [...buckets.keys()]
     .sort((a, b) => {
@@ -556,9 +548,7 @@ function groupByEvent(
       const rows = buckets.get(slug)!;
       return {
         slug,
-        name:
-          nameBySlug.get(slug) ??
-          (slug === "unknown" ? "Unassigned" : slug.replace(/\b\w/g, (c) => c.toUpperCase())),
+        name: nameBySlug.get(slug) ?? slug.replace(/\b\w/g, (c) => c.toUpperCase()),
         rows,
         buyers: rows.filter((r) => !r.isAttendee),
         attendees: rows.filter((r) => r.isAttendee),
@@ -584,62 +574,6 @@ function PurchasesView({
   const [selected, setSelected] = useState<SeminarPurchaser | null>(null);
   const [search, setSearch] = useState("");
 
-  // Bulk-assign unassigned contacts to an event (adds the event tags in GHL).
-  const assignFn = useServerFn(assignContactsToEvent);
-  const upcoming = splitEvents(events, getTodayISO()).upcoming;
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [assignTo, setAssignTo] = useState("");
-  const [assignTier, setAssignTier] = useState<"ga" | "vip">("ga");
-  const [assigning, setAssigning] = useState(false);
-  const [assignMsg, setAssignMsg] = useState<string | null>(null);
-
-  const toggleSelected = (id: string) =>
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-
-  // Select / deselect every contact in a group (the Unassigned "select all").
-  const toggleAll = (rows: SeminarPurchaser[]) => {
-    const ids = rows.map((r) => r.id).filter(Boolean);
-    setSelectedIds((prev) => {
-      const allSelected = ids.length > 0 && ids.every((id) => prev.has(id));
-      const next = new Set(prev);
-      ids.forEach((id) => (allSelected ? next.delete(id) : next.add(id)));
-      return next;
-    });
-  };
-
-  const handleBulkAssign = async () => {
-    if (!assignTo || selectedIds.size === 0) return;
-    const ev = events.find((e) => e.slug === assignTo);
-    setAssigning(true);
-    setAssignMsg(null);
-    try {
-      const res = await assignFn({
-        data: {
-          password,
-          contactIds: [...selectedIds],
-          city: assignTo,
-          endDate: ev?.end_date || undefined,
-          tier: assignTier,
-        },
-      });
-      setAssignMsg(
-        `Assigned ${res.assigned} contact${res.assigned === 1 ? "" : "s"} to ${ev?.city || assignTo}.`,
-      );
-      setSelectedIds(new Set());
-      setAssignTo("");
-      onRefresh();
-    } catch (err) {
-      setAssignMsg(err instanceof Error ? err.message : "Assign failed.");
-    } finally {
-      setAssigning(false);
-    }
-  };
-
   const q = search.trim().toLowerCase();
   const filtered = (purchasers ?? []).filter((p) => {
     if (!q) return true;
@@ -652,13 +586,13 @@ function PurchasesView({
       p.tags.some((t) => t.toLowerCase().includes(q))
     );
   });
-  // Most-recently-ended past event — used as the cutoff so the Unassigned group
-  // only shows buyers added since then (active/upcoming-event buyers).
-  const recentCutoff = splitEvents(events, getTodayISO()).past[0]?.end_date;
-  const groups = purchasers ? groupByEvent(filtered, events, recentCutoff) : [];
-  const totalPeople = purchasers?.length ?? 0;
-  const totalBuyers = (purchasers ?? []).filter((p) => !p.isAttendee).length;
-  const totalAttendees = (purchasers ?? []).filter((p) => p.isAttendee).length;
+  const groups = purchasers ? groupByEvent(filtered, events) : [];
+  // Totals reflect only event-tagged purchasers (i.e. what's shown), so the
+  // numbers stay consistent with the per-event tables.
+  const tagged = (purchasers ?? []).filter((p) => p.eventSlug);
+  const totalPeople = tagged.length;
+  const totalBuyers = tagged.filter((p) => !p.isAttendee).length;
+  const totalAttendees = tagged.filter((p) => p.isAttendee).length;
 
   return (
     <div>
@@ -716,195 +650,117 @@ function PurchasesView({
       <div className="space-y-8">
         {groups.map((group) => (
           <section key={group.slug}>
+            <div className="mb-3 flex flex-wrap items-baseline justify-between gap-4">
+              <h2 className="text-lg font-bold capitalize">{group.name}</h2>
+              <p className="text-sm text-muted-foreground">
+                {group.buyers.length} {group.buyers.length === 1 ? "buyer" : "buyers"} ·{" "}
+                {group.attendees.length} attendee{group.attendees.length === 1 ? "" : "s"} added
+              </p>
+            </div>
+
             {(() => {
-              const isUnassigned = group.slug === "unknown";
+              // Seats sold per tier = number of event-tagged contacts in
+              // this cohort. VIP = VIP-tier contacts; GA = everyone else
+              // (GA buyers + attendees, since VIP is single-seat). A
+              // GA-only cohort (e.g. Nashville) has no VIP inventory, so
+              // its VIP tier is shown sold out.
+              const vipHidden = !isVipOffered(group.slug);
+              const vipCount = group.rows.filter((r) => r.tier === "VIP").length;
+              const gaSold = group.rows.length - vipCount;
+              const vipSold = vipHidden ? TIER_LIMITS.vip : vipCount;
+              const tiers: Array<{ label: string; sold: number; limit: number }> = [
+                { label: "GA", sold: gaSold, limit: TIER_LIMITS.ga },
+                { label: "VIP", sold: vipSold, limit: TIER_LIMITS.vip },
+              ];
               return (
-                <>
-                  <div className="mb-3 flex flex-wrap items-baseline justify-between gap-4">
-                    <h2 className="text-lg font-bold capitalize">{group.name}</h2>
-                    <p className="text-sm text-muted-foreground">
-                      {group.buyers.length} {group.buyers.length === 1 ? "buyer" : "buyers"} ·{" "}
-                      {group.attendees.length} attendee{group.attendees.length === 1 ? "" : "s"}{" "}
-                      added
-                    </p>
-                  </div>
-
-                  {!isUnassigned &&
-                    (() => {
-                      // Seats sold per tier = number of event-tagged contacts in
-                      // this cohort. VIP = VIP-tier contacts; GA = everyone else
-                      // (GA buyers + attendees, since VIP is single-seat). A
-                      // GA-only cohort (e.g. Nashville) has no VIP inventory, so
-                      // its VIP tier is shown sold out.
-                      const vipHidden = !isVipOffered(group.slug);
-                      const vipCount = group.rows.filter((r) => r.tier === "VIP").length;
-                      const gaSold = group.rows.length - vipCount;
-                      const vipSold = vipHidden ? TIER_LIMITS.vip : vipCount;
-                      const tiers: Array<{ label: string; sold: number; limit: number }> = [
-                        { label: "GA", sold: gaSold, limit: TIER_LIMITS.ga },
-                        { label: "VIP", sold: vipSold, limit: TIER_LIMITS.vip },
-                      ];
-                      return (
-                        <div className="mb-3 flex flex-wrap items-center gap-4 rounded-lg border border-primary/40 bg-primary/5 p-3 text-sm">
-                          <Ticket className="h-4 w-4 text-primary" />
-                          {tiers.map((t) => {
-                            const remaining = Math.max(t.limit - t.sold, 0);
-                            return (
-                              <span key={t.label} className="flex items-center gap-1.5">
-                                <span className="font-semibold">{t.label} tickets:</span>
-                                <span>
-                                  {t.sold} / {t.limit} sold
-                                </span>
-                                <span
-                                  className={remaining > 0 ? "text-primary" : "text-destructive"}
-                                >
-                                  · {remaining > 0 ? `${remaining} available` : "Sold out"}
-                                </span>
-                              </span>
-                            );
-                          })}
-                        </div>
-                      );
-                    })()}
-
-                  {isUnassigned && (
-                    <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/20 p-3">
-                      <span className="text-sm text-muted-foreground">
-                        {selectedIds.size} selected
+                <div className="mb-3 flex flex-wrap items-center gap-4 rounded-lg border border-primary/40 bg-primary/5 p-3 text-sm">
+                  <Ticket className="h-4 w-4 text-primary" />
+                  {tiers.map((t) => {
+                    const remaining = Math.max(t.limit - t.sold, 0);
+                    return (
+                      <span key={t.label} className="flex items-center gap-1.5">
+                        <span className="font-semibold">{t.label} tickets:</span>
+                        <span>
+                          {t.sold} / {t.limit} sold
+                        </span>
+                        <span className={remaining > 0 ? "text-primary" : "text-destructive"}>
+                          · {remaining > 0 ? `${remaining} available` : "Sold out"}
+                        </span>
                       </span>
-                      <select
-                        className="h-9 rounded-md border border-input bg-transparent px-2 text-sm"
-                        value={assignTo}
-                        onChange={(e) => setAssignTo(e.target.value)}
-                      >
-                        <option value="">Assign to event…</option>
-                        {upcoming.map((e) => (
-                          <option key={e.slug} value={e.slug}>
-                            {e.city || e.slug}
-                          </option>
-                        ))}
-                      </select>
-                      <select
-                        className="h-9 rounded-md border border-input bg-transparent px-2 text-sm"
-                        value={assignTier}
-                        onChange={(e) => setAssignTier(e.target.value as "ga" | "vip")}
-                        aria-label="Ticket tier"
-                      >
-                        <option value="ga">General Admission</option>
-                        <option value="vip">VIP</option>
-                      </select>
-                      <Button
-                        size="sm"
-                        onClick={handleBulkAssign}
-                        disabled={assigning || !assignTo || selectedIds.size === 0}
-                      >
-                        {assigning && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
-                        Assign to event
-                      </Button>
-                      {assignMsg && <span className="text-xs text-primary">{assignMsg}</span>}
-                    </div>
-                  )}
-
-                  <Card className="overflow-hidden">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          {isUnassigned && (
-                            <TableHead className="w-8">
-                              <input
-                                type="checkbox"
-                                className="accent-primary"
-                                aria-label="Select all"
-                                checked={
-                                  group.rows.some((r) => r.id) &&
-                                  group.rows.every((r) => !r.id || selectedIds.has(r.id))
-                                }
-                                onChange={() => toggleAll(group.rows)}
-                              />
-                            </TableHead>
-                          )}
-                          <TableHead>Name</TableHead>
-                          <TableHead>Email</TableHead>
-                          <TableHead>Phone</TableHead>
-                          <TableHead>Tier</TableHead>
-                          <TableHead>Type</TableHead>
-                          <TableHead className="text-center">Tickets Purchased</TableHead>
-                          <TableHead className="text-center">Unassigned Tickets</TableHead>
-                          <TableHead>Purchased On</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {group.rows.map((p) => {
-                          const qty = p.ticketQuantity || 0;
-                          // Buyer = 1 seat; remaining = total − buyer − attendees already added.
-                          const remaining =
-                            !p.isAttendee && qty > 0 ? Math.max(qty - 1 - p.attendeesAdded, 0) : 0;
-                          return (
-                            <TableRow
-                              key={p.id || p.email}
-                              className="cursor-pointer"
-                              onClick={() => setSelected(p)}
-                            >
-                              {isUnassigned && (
-                                <TableCell onClick={(e) => e.stopPropagation()}>
-                                  <input
-                                    type="checkbox"
-                                    className="accent-primary"
-                                    checked={selectedIds.has(p.id)}
-                                    onChange={() => toggleSelected(p.id)}
-                                    disabled={!p.id}
-                                  />
-                                </TableCell>
-                              )}
-                              <TableCell className="font-medium">{p.name || "—"}</TableCell>
-                              <TableCell className="text-muted-foreground">
-                                {p.email || "—"}
-                              </TableCell>
-                              <TableCell className="text-muted-foreground">
-                                {p.phone || "—"}
-                              </TableCell>
-                              <TableCell>{p.tier || "—"}</TableCell>
-                              <TableCell>
-                                {p.isAttendee ? (
-                                  <Badge variant="outline" className="text-[10px]">
-                                    attendee
-                                  </Badge>
-                                ) : (
-                                  <Badge variant="secondary" className="text-[10px]">
-                                    buyer
-                                  </Badge>
-                                )}
-                              </TableCell>
-                              <TableCell className="text-center font-medium">
-                                {p.isAttendee ? "—" : qty > 0 ? qty : "—"}
-                              </TableCell>
-                              <TableCell className="text-center">
-                                {p.isAttendee || qty === 0 ? (
-                                  "—"
-                                ) : (
-                                  <span
-                                    className={
-                                      remaining > 0
-                                        ? "font-semibold text-primary"
-                                        : "text-muted-foreground"
-                                    }
-                                  >
-                                    {remaining}
-                                  </span>
-                                )}
-                              </TableCell>
-                              <TableCell className="whitespace-nowrap text-muted-foreground">
-                                {formatPurchaseDate(p.dateAdded)}
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })}
-                      </TableBody>
-                    </Table>
-                  </Card>
-                </>
+                    );
+                  })}
+                </div>
               );
             })()}
+
+            <Card className="overflow-hidden">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Email</TableHead>
+                    <TableHead>Phone</TableHead>
+                    <TableHead>Tier</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead className="text-center">Tickets Purchased</TableHead>
+                    <TableHead className="text-center">Unassigned Tickets</TableHead>
+                    <TableHead>Purchased On</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {group.rows.map((p) => {
+                    const qty = p.ticketQuantity || 0;
+                    // Buyer = 1 seat; remaining = total − buyer − attendees already added.
+                    const remaining =
+                      !p.isAttendee && qty > 0 ? Math.max(qty - 1 - p.attendeesAdded, 0) : 0;
+                    return (
+                      <TableRow
+                        key={p.id || p.email}
+                        className="cursor-pointer"
+                        onClick={() => setSelected(p)}
+                      >
+                        <TableCell className="font-medium">{p.name || "—"}</TableCell>
+                        <TableCell className="text-muted-foreground">{p.email || "—"}</TableCell>
+                        <TableCell className="text-muted-foreground">{p.phone || "—"}</TableCell>
+                        <TableCell>{p.tier || "—"}</TableCell>
+                        <TableCell>
+                          {p.isAttendee ? (
+                            <Badge variant="outline" className="text-[10px]">
+                              attendee
+                            </Badge>
+                          ) : (
+                            <Badge variant="secondary" className="text-[10px]">
+                              buyer
+                            </Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-center font-medium">
+                          {p.isAttendee ? "—" : qty > 0 ? qty : "—"}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          {p.isAttendee || qty === 0 ? (
+                            "—"
+                          ) : (
+                            <span
+                              className={
+                                remaining > 0
+                                  ? "font-semibold text-primary"
+                                  : "text-muted-foreground"
+                              }
+                            >
+                              {remaining}
+                            </span>
+                          )}
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap text-muted-foreground">
+                          {formatPurchaseDate(p.dateAdded)}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </Card>
           </section>
         ))}
       </div>

@@ -159,6 +159,10 @@ function scrollToOffers() {
   document.getElementById("offers")?.scrollIntoView({ behavior: "smooth" });
 }
 
+function scrollToHero() {
+  document.getElementById("hero")?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
 function Index() {
   const { events: loaderEvents } = Route.useLoaderData();
   const [allEvents, setAllEvents] = useState(loaderEvents);
@@ -202,7 +206,17 @@ function Index() {
       {/* Header */}
       <header className="sticky top-0 z-50 border-b border-border bg-background/85 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-          <Link to="/" className="flex items-center gap-2">
+          <Link
+            to="/"
+            hash="hero"
+            onClick={(e) => {
+              // Already on the main page — scroll up to the hero instead of a
+              // no-op navigation (noticeable on mobile when scrolled down).
+              e.preventDefault();
+              scrollToHero();
+            }}
+            className="flex items-center gap-2"
+          >
             <img src={logo} alt="Scale & Profit" className="h-10 w-auto" />
           </Link>
           <Button onClick={scrollToOffers}>Sign up Now!</Button>
@@ -210,7 +224,7 @@ function Index() {
       </header>
 
       {/* Hero */}
-      <section className="relative overflow-hidden">
+      <section id="hero" className="relative scroll-mt-20 overflow-hidden">
         <div
           className="absolute inset-0 bg-cover bg-center"
           style={{ backgroundImage: `url(${coachesHero})` }}
