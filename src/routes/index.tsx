@@ -166,7 +166,9 @@ function scrollToHero() {
 function Index() {
   const { events: loaderEvents } = Route.useLoaderData();
   const [allEvents, setAllEvents] = useState(loaderEvents);
-  const [openEvent, setOpenEvent] = useState<number | null>(0);
+  // No event expanded by default — visitors pick an event to slide its offer
+  // section open.
+  const [openEvent, setOpenEvent] = useState<number | null>(null);
   // Pick up this browser's admin edits (localStorage) after hydration.
   useEffect(() => {
     setAllEvents(loadStoredEvents(loaderEvents));
