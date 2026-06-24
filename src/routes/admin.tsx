@@ -39,6 +39,7 @@ import {
   getPurchaserDetail,
   addAttendeesToGhl,
   revokeAttendeeFromBuyer,
+  addManualBuyer,
   TIER_LIMITS,
   type SeminarPurchaser,
   type PurchaserDetail,
@@ -560,6 +561,7 @@ function PurchasesView({
 }) {
   const [selected, setSelected] = useState<SeminarPurchaser | null>(null);
   const [search, setSearch] = useState("");
+  const [showAdd, setShowAdd] = useState(false);
 
   const q = search.trim().toLowerCase();
   const filtered = (purchasers ?? []).filter((p) => {
@@ -575,7 +577,8 @@ function PurchasesView({
   });
   // Only current/upcoming cohorts are shown — past events (e.g. Boston) are
   // hidden so the dashboard reflects who's coming to live events.
-  const upcomingSlugs = new Set(splitEvents(events, getTodayISO()).upcoming.map((e) => e.slug));
+  const upcomingEvents = splitEvents(events, getTodayISO()).upcoming;
+  const upcomingSlugs = new Set(upcomingEvents.map((e) => e.slug));
   const groups = purchasers
     ? groupByEvent(filtered, events).filter((g) => upcomingSlugs.has(g.slug))
     : [];
@@ -603,10 +606,15 @@ function PurchasesView({
             value={String(groups.length)}
           />
         </div>
-        <Button variant="outline" size="sm" onClick={onRefresh} disabled={loading}>
-          <RefreshCw className={`mr-1.5 h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-          {loading ? "Loading…" : "Refresh"}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button size="sm" onClick={() => setShowAdd(true)} disabled={upcomingEvents.length === 0}>
+            <Plus className="mr-1.5 h-4 w-4" /> Add attendee
+          </Button>
+          <Button variant="outline" size="sm" onClick={onRefresh} disabled={loading}>
+            <RefreshCw className={`mr-1.5 h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+            {loading ? "Loading…" : "Refresh"}
+          </Button>
+        </div>
       </div>
 
       <div className="mb-6">
@@ -758,7 +766,187 @@ function PurchasesView({
       </div>
 
       <PurchaserDialog purchaser={selected} password={password} onClose={() => setSelected(null)} />
+      <AddBuyerDialog
+        open={showAdd}
+        events={upcomingEvents}
+        password={password}
+        onClose={() => setShowAdd(false)}
+        onAdded={onRefresh}
+      />
     </div>
+  );
+}
+
+function AddBuyerDialog({
+  open,
+  events,
+  password,
+  onClose,
+  onAdded,
+}: {
+  open: boolean;
+  events: EventRow[];
+  password: string;
+  onClose: () => void;
+  onAdded: () => void;
+}) {
+  const addFn = useServerFn(addManualBuyer);
+  const [city, setCity] = useState("");
+  const [tier, setTier] = useState<"ga" | "vip">("ga");
+  const [quantity, setQuantity] = useState(1);
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Reset the form each time the dialog opens.
+  useEffect(() => {
+    if (!open) return;
+    setCity("");
+    setTier("ga");
+    setQuantity(1);
+    setFirstName("");
+    setLastName("");
+    setEmail("");
+    setPhone("");
+    setError(null);
+    setSaving(false);
+  }, [open]);
+
+  // VIP is single-seat — force 1 ticket.
+  const effectiveQty = tier === "vip" ? 1 : quantity;
+
+  const submit = async () => {
+    if (!city) return setError("Please select an event.");
+    if (!firstName.trim() || !lastName.trim() || !email.trim())
+      return setError("First name, last name and email are required.");
+    setError(null);
+    setSaving(true);
+    try {
+      const ev = events.find((e) => e.slug === city);
+      const res = await addFn({
+        data: {
+          password,
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
+          email: email.trim(),
+          phone: phone.trim() || undefined,
+          city,
+          endDate: ev?.end_date || undefined,
+          tier,
+          quantity: effectiveQty,
+        },
+      });
+      if (!res.ok) {
+        setError("Failed to add — please try again.");
+        return;
+      }
+      onAdded();
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to add attendee.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const selectCls = "h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm";
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Add attendee manually</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 text-sm">
+          <div className="space-y-1.5">
+            <Label className="text-xs uppercase tracking-wide text-muted-foreground">Event</Label>
+            <select className={selectCls} value={city} onChange={(e) => setCity(e.target.value)}>
+              <option value="">Select event…</option>
+              {events.map((e) => (
+                <option key={e.slug} value={e.slug}>
+                  {e.city || e.slug}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label className="text-xs uppercase tracking-wide text-muted-foreground">Tier</Label>
+              <select
+                className={selectCls}
+                value={tier}
+                onChange={(e) => setTier(e.target.value as "ga" | "vip")}
+              >
+                <option value="ga">General Admission</option>
+                <option value="vip">VIP</option>
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+                Tickets
+              </Label>
+              <Input
+                type="number"
+                min={1}
+                max={20}
+                value={effectiveQty}
+                disabled={tier === "vip"}
+                onChange={(e) =>
+                  setQuantity(Math.min(Math.max(parseInt(e.target.value, 10) || 1, 1), 20))
+                }
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+                First name
+              </Label>
+              <Input value={firstName} onChange={(e) => setFirstName(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+                Last name
+              </Label>
+              <Input value={lastName} onChange={(e) => setLastName(e.target.value)} />
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs uppercase tracking-wide text-muted-foreground">Email</Label>
+            <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+              Phone (optional)
+            </Label>
+            <Input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} />
+          </div>
+
+          {error && <p className="text-xs text-destructive">{error}</p>}
+
+          <div className="flex justify-end gap-2 pt-1">
+            <Button variant="outline" size="sm" onClick={onClose} disabled={saving}>
+              Cancel
+            </Button>
+            <Button size="sm" onClick={submit} disabled={saving}>
+              {saving ? (
+                <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+              ) : (
+                <Plus className="mr-1.5 h-4 w-4" />
+              )}
+              {saving ? "Adding…" : "Add attendee"}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

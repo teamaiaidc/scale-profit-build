@@ -996,6 +996,54 @@ export const revokeAttendeeFromBuyer = createServerFn({ method: "POST" })
     return { ok: true, attendeesAdded: nextCount };
   });
 
+const manualBuyerSchema = z.object({
+  password: z.string().min(1).max(200),
+  firstName: z.string().min(1).max(100),
+  lastName: z.string().min(1).max(100),
+  email: z.string().email().max(200),
+  phone: z.string().max(30).optional(),
+  city: z.string().min(1).max(50),
+  // ISO end date (YYYY-MM-DD); falls back to the slug's seeded date if omitted.
+  endDate: z.string().max(20).optional(),
+  tier: z.enum(["ga", "vip"]),
+  quantity: z.number().int().min(1).max(20),
+});
+
+// Admin: add a buyer to an event by hand (e.g. an offline / phone purchase).
+// Upserts the contact, writes tier + ticket count, and applies the event tag
+// 🤝 s&p-{tier}-{city}-{yymmdd} so they show under the right event on the
+// dashboard — exactly like a real checkout. Admin-gated.
+export const addManualBuyer = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) => manualBuyerSchema.parse(d))
+  .handler(async ({ data }) => {
+    assertAdmin(data.password);
+    const tierLabel = data.tier === "vip" ? "VIP" : "General Admission";
+    // VIP is single-seat — never multi.
+    const quantity = data.tier === "vip" ? 1 : data.quantity;
+    const tag = eventTag(data.tier, data.city, data.endDate);
+    const up = (await ghlFetch("/contacts/upsert", {
+      method: "POST",
+      body: JSON.stringify({
+        locationId: GHL_LOCATION_ID,
+        firstName: data.firstName,
+        lastName: data.lastName,
+        email: data.email,
+        ...(data.phone ? { phone: data.phone } : {}),
+        // Buyer (not an attendee) — source is used to tell them apart.
+        source: "Scale & Profit Seminar - Admin",
+        tags: [tag],
+        customFields: [
+          { key: FIELD_KEYS.eventCity, field_value: data.city },
+          { key: FIELD_KEYS.ticketTier, field_value: tierLabel },
+          { key: FIELD_KEYS.ticketQuantity, field_value: String(quantity) },
+          { key: FIELD_KEYS.ticketQuantityLegacy, field_value: String(quantity) },
+        ],
+      }),
+    })) as { contact?: { id?: string }; id?: string };
+    const contactId = up.contact?.id ?? up.id;
+    return { ok: Boolean(contactId), contactId, tag };
+  });
+
 // ============== Admin: purchasers / attendees ==============
 
 // Legacy umbrella tag. New contacts no longer get it (they carry only the single
