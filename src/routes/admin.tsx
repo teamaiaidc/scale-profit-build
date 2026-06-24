@@ -40,6 +40,7 @@ import {
   addAttendeesToGhl,
   revokeAttendeeFromBuyer,
   addManualBuyer,
+  clearEventTags,
   TIER_LIMITS,
   type SeminarPurchaser,
   type PurchaserDetail,
@@ -562,6 +563,9 @@ function PurchasesView({
   const [selected, setSelected] = useState<SeminarPurchaser | null>(null);
   const [search, setSearch] = useState("");
   const [showAdd, setShowAdd] = useState(false);
+  const clearFn = useServerFn(clearEventTags);
+  const [clearing, setClearing] = useState(false);
+  const [clearMsg, setClearMsg] = useState<string | null>(null);
 
   const q = search.trim().toLowerCase();
   const filtered = (purchasers ?? []).filter((p) => {
@@ -589,6 +593,34 @@ function PurchasesView({
   const totalBuyers = upcomingPurchasers.filter((p) => !p.isAttendee).length;
   const totalAttendees = upcomingPurchasers.filter((p) => p.isAttendee).length;
 
+  // Testing reset: remove the event tag from every contact on the dashboard so
+  // they drop off (contacts are kept in GHL). Confirms first — it's destructive.
+  const handleClearAll = async () => {
+    const targets = upcomingPurchasers.filter((p) => p.id);
+    if (targets.length === 0) return;
+    if (
+      !window.confirm(
+        `Remove the event tag from all ${targets.length} contact(s) on the dashboard?\n\n` +
+          "They'll disappear from here but their contact records stay in GHL. This is for testing.",
+      )
+    ) {
+      return;
+    }
+    setClearing(true);
+    setClearMsg(null);
+    try {
+      const res = await clearFn({
+        data: { password, contacts: targets.map((p) => ({ id: p.id, tags: p.tags })) },
+      });
+      setClearMsg(`Removed event tags from ${res.cleared} contact(s).`);
+      onRefresh();
+    } catch (err) {
+      setClearMsg(err instanceof Error ? err.message : "Clear failed.");
+    } finally {
+      setClearing(false);
+    }
+  };
+
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
@@ -606,7 +638,22 @@ function PurchasesView({
             value={String(groups.length)}
           />
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {clearMsg && <span className="text-xs text-muted-foreground">{clearMsg}</span>}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleClearAll}
+            disabled={clearing || upcomingPurchasers.length === 0}
+            className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+          >
+            {clearing ? (
+              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+            ) : (
+              <Trash2 className="mr-1.5 h-4 w-4" />
+            )}
+            {clearing ? "Clearing…" : "Clear all (testing)"}
+          </Button>
           <Button size="sm" onClick={() => setShowAdd(true)} disabled={upcomingEvents.length === 0}>
             <Plus className="mr-1.5 h-4 w-4" /> Add attendee
           </Button>
