@@ -73,6 +73,16 @@ export function isVipOffered(slug: string): boolean {
   return !VIP_HIDDEN_SLUGS.has(slug.toLowerCase());
 }
 
+// Turn a city / event name into a URL- and tag-safe slug:
+//   "New York, NY" → "new-york-ny", "Nashville" → "nashville".
+export function slugify(input: string): string {
+  return input
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
 // Local date as YYYY-MM-DD, for comparing against an event's end_date.
 export function getTodayISO(now: Date = new Date()): string {
   const y = now.getFullYear();

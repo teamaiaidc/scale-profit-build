@@ -44,7 +44,7 @@ import {
   type PurchaserDetail,
   type AttendeeRecord,
 } from "@/lib/ghl.functions";
-import { getTodayISO, splitEvents, isVipOffered, type EventRow } from "@/lib/events";
+import { getTodayISO, splitEvents, isVipOffered, slugify, type EventRow } from "@/lib/events";
 import { loadStoredEvents, saveStoredEvents } from "@/lib/events.store";
 
 export const Route = createFileRoute("/admin")({
@@ -147,32 +147,19 @@ const TEXT_FIELDS: { key: keyof EventRow; label: string; placeholder?: string }[
   { key: "time", label: "Time" },
 ];
 
-/** Shared field group used by both the edit cards and the add-new form. */
+/** Shared field group used by both the edit cards and the add-new form. The
+ *  slug (URL + tag id) is derived from the City automatically — no slug field. */
 function EventFields({
   value,
   onChange,
-  withSlug = false,
   idPrefix,
 }: {
   value: EventRow;
   onChange: (key: keyof EventRow, v: string) => void;
-  withSlug?: boolean;
   idPrefix: string;
 }) {
   return (
     <div className="grid gap-4 sm:grid-cols-2">
-      {withSlug && (
-        <div>
-          <Label htmlFor={`${idPrefix}-slug`}>Slug (URL id, e.g. "dallas")</Label>
-          <Input
-            id={`${idPrefix}-slug`}
-            value={value.slug}
-            onChange={(e) => onChange("slug", e.target.value)}
-            placeholder="lowercase-with-hyphens"
-            className="mt-1.5"
-          />
-        </div>
-      )}
       {TEXT_FIELDS.map((f) => (
         <div key={f.key}>
           <Label htmlFor={`${idPrefix}-${f.key}`}>{f.label}</Label>
@@ -289,17 +276,18 @@ function AdminPage() {
 
   function addEvent() {
     setAddError("");
-    const slug = newEvent.slug.trim().toLowerCase();
-    if (!/^[a-z0-9-]+$/.test(slug)) {
-      setAddError("Slug may only contain lowercase letters, numbers and hyphens.");
+    if (!newEvent.city || !newEvent.date || !/^\d{4}-\d{2}-\d{2}$/.test(newEvent.end_date)) {
+      setAddError("Please fill in at least City, Date and a valid End date.");
+      return;
+    }
+    // The slug (URL + tag id) is derived from the city automatically and frozen.
+    const slug = slugify(newEvent.city);
+    if (!slug) {
+      setAddError("Please enter a valid City / Event name.");
       return;
     }
     if (events.some((e) => e.slug === slug)) {
-      setAddError(`An event with slug "${slug}" already exists.`);
-      return;
-    }
-    if (!newEvent.city || !newEvent.date || !/^\d{4}-\d{2}-\d{2}$/.test(newEvent.end_date)) {
-      setAddError("Please fill in at least City, Date and a valid End date.");
+      setAddError(`An event for "${newEvent.city}" already exists.`);
       return;
     }
     const maxOrder = events.reduce((m, e) => Math.max(m, e.sort_order), 0);
@@ -467,7 +455,6 @@ function AdminPage() {
                 <EventFields
                   value={newEvent}
                   idPrefix="new"
-                  withSlug
                   onChange={(key, v) => {
                     setNewEvent((prev) => ({ ...prev, [key]: v }));
                     setAddState("idle");
