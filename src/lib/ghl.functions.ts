@@ -1291,23 +1291,14 @@ function assertAdmin(password: string) {
 
 const purchasersInputSchema = z.object({ password: z.string().min(1).max(200) });
 
-// TEMPORARY: pause the dashboard contact sync while tags are being corrected in
-// GHL. When true, the dashboard shows no contacts (GHL is NOT touched — no tags
-// removed, no contacts changed). Set back to false to re-enable the live sync;
-// the dashboard then repopulates automatically from the (corrected) event tags.
-const DASHBOARD_SYNC_PAUSED = true;
-
 // Lists everyone tagged into a Scale & Profit event (buyers + attendees) for the
 // admin Attendees tab, grouped client-side by event. Password-gated server-side
-// because it returns contact PII.
+// because it returns contact PII. Tier (GA/VIP) + event are read from the
+// 🤝 s&p-{tier}-{city}-{yymmdd} tag; buyer vs attendee from the contact source.
 export const listSeminarPurchasers = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => purchasersInputSchema.parse(d))
   .handler(async ({ data }) => {
     assertAdmin(data.password);
-
-    // Sync paused (see DASHBOARD_SYNC_PAUSED): return nothing so the dashboard is
-    // empty without reading/altering any GHL data.
-    if (DASHBOARD_SYNC_PAUSED) return { purchasers: [] as SeminarPurchaser[], error: null };
 
     // Fast path: query legacy / ASCII tags only. NEVER send the 🤝 emoji tag as a
     // search value — GHL's search 400s on it ("Error occurred while searching").
