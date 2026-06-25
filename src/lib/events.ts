@@ -65,8 +65,9 @@ export function normalizeEvent(e: Partial<EventRow>): EventRow {
 }
 
 // Events that are General-Admission only — the VIP tier is hidden on the landing
-// page and blocked at checkout for these cities.
-export const VIP_HIDDEN_SLUGS = new Set<string>(["nashville"]);
+// page and blocked at checkout for these cities. (Empty now: all events offer
+// VIP; sold-out is driven purely by the live count vs the VIP cap.)
+export const VIP_HIDDEN_SLUGS = new Set<string>();
 
 // Whether the VIP tier is offered for a given event slug.
 export function isVipOffered(slug: string): boolean {
