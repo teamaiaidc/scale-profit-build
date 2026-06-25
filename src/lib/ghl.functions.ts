@@ -1044,45 +1044,6 @@ export const addManualBuyer = createServerFn({ method: "POST" })
     return { ok: Boolean(contactId), contactId, tag };
   });
 
-const clearTagsSchema = z.object({
-  password: z.string().min(1).max(200),
-  contacts: z
-    .array(
-      z.object({
-        id: z.string().min(1).max(100),
-        tags: z.array(z.string().max(200)).max(50),
-      }),
-    )
-    .min(1)
-    .max(2000),
-});
-
-// Admin (testing reset): remove the event tag(s) from the given contacts so they
-// drop off the dashboard. The contact records themselves are KEPT in GHL — only
-// tags that resolve to an event (deriveEventSlug) are removed; other tags stay.
-export const clearEventTags = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) => clearTagsSchema.parse(d))
-  .handler(async ({ data }) => {
-    assertAdmin(data.password);
-    const targets = data.contacts
-      .map((c) => ({ id: c.id, remove: c.tags.filter((t) => deriveEventSlug([t]) !== "") }))
-      .filter((c) => c.remove.length > 0);
-    const results = await mapWithConcurrency(targets, 6, async (c) => {
-      try {
-        await ghlFetch(`/contacts/${c.id}/tags`, {
-          method: "DELETE",
-          body: JSON.stringify({ tags: c.remove }),
-        });
-        return true;
-      } catch (err) {
-        console.warn(`GHL clear tags failed for ${c.id}:`, (err as Error).message);
-        return false;
-      }
-    });
-    const cleared = results.filter(Boolean).length;
-    return { ok: cleared === targets.length, cleared, failed: targets.length - cleared };
-  });
-
 // ============== Admin: purchasers / attendees ==============
 
 // Legacy umbrella tag. New contacts no longer get it (they carry only the single
