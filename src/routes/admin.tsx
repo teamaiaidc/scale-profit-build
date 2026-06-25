@@ -17,6 +17,8 @@ import {
   Mail,
   Phone,
   MapPin,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -562,6 +564,28 @@ function PurchasesView({
   const [selected, setSelected] = useState<SeminarPurchaser | null>(null);
   const [search, setSearch] = useState("");
   const [showAdd, setShowAdd] = useState(false);
+  // Temporarily hide the whole contact list (buyers + attendees) from the
+  // dashboard display — e.g. while correcting tags in GHL. Per-browser only;
+  // touches NOTHING in GHL. Toggle back on to show them again.
+  const [hideContacts, setHideContacts] = useState(false);
+  useEffect(() => {
+    try {
+      setHideContacts(window.localStorage.getItem("sp-admin-hide-contacts") === "1");
+    } catch {
+      /* ignore */
+    }
+  }, []);
+  const toggleHideContacts = () => {
+    setHideContacts((v) => {
+      const next = !v;
+      try {
+        window.localStorage.setItem("sp-admin-hide-contacts", next ? "1" : "0");
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  };
 
   const q = search.trim().toLowerCase();
   const filtered = (purchasers ?? []).filter((p) => {
@@ -607,6 +631,14 @@ function PurchasesView({
           />
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm" onClick={toggleHideContacts}>
+            {hideContacts ? (
+              <Eye className="mr-1.5 h-4 w-4" />
+            ) : (
+              <EyeOff className="mr-1.5 h-4 w-4" />
+            )}
+            {hideContacts ? "Show list" : "Hide list"}
+          </Button>
           <Button size="sm" onClick={() => setShowAdd(true)} disabled={upcomingEvents.length === 0}>
             <Plus className="mr-1.5 h-4 w-4" /> Add attendee
           </Button>
@@ -633,13 +665,20 @@ function PurchasesView({
         </p>
       )}
 
-      {loading && purchasers === null && (
+      {hideContacts && (
+        <p className="rounded-lg border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+          Contact list is hidden. Click “Show list” to display buyers and attendees again. (Nothing
+          in GHL is changed by hiding.)
+        </p>
+      )}
+
+      {!hideContacts && loading && purchasers === null && (
         <div className="flex items-center justify-center gap-2 rounded-lg border border-dashed border-border p-12 text-muted-foreground">
           <Loader2 className="h-5 w-5 animate-spin" /> Loading purchasers from GHL…
         </div>
       )}
 
-      {!loading && purchasers !== null && groups.length === 0 && (
+      {!hideContacts && !loading && purchasers !== null && groups.length === 0 && (
         <p className="rounded-lg border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
           {q
             ? `No purchasers match “${search}”.`
@@ -647,123 +686,125 @@ function PurchasesView({
         </p>
       )}
 
-      <div className="space-y-8">
-        {groups.map((group) => (
-          <section key={group.slug}>
-            <div className="mb-3 flex flex-wrap items-baseline justify-between gap-4">
-              <h2 className="text-lg font-bold capitalize">{group.name}</h2>
-              <p className="text-sm text-muted-foreground">
-                {group.buyers.length} {group.buyers.length === 1 ? "buyer" : "buyers"} ·{" "}
-                {group.attendees.length} attendee{group.attendees.length === 1 ? "" : "s"} added
-              </p>
-            </div>
+      {!hideContacts && (
+        <div className="space-y-8">
+          {groups.map((group) => (
+            <section key={group.slug}>
+              <div className="mb-3 flex flex-wrap items-baseline justify-between gap-4">
+                <h2 className="text-lg font-bold capitalize">{group.name}</h2>
+                <p className="text-sm text-muted-foreground">
+                  {group.buyers.length} {group.buyers.length === 1 ? "buyer" : "buyers"} ·{" "}
+                  {group.attendees.length} attendee{group.attendees.length === 1 ? "" : "s"} added
+                </p>
+              </div>
 
-            {(() => {
-              // Seats sold per tier = number of event-tagged contacts in
-              // this cohort. VIP = VIP-tier contacts; GA = everyone else
-              // (GA buyers + attendees, since VIP is single-seat). A
-              // GA-only cohort (e.g. Nashville) has no VIP inventory, so
-              // its VIP tier is shown sold out.
-              const vipHidden = !isVipOffered(group.slug);
-              const vipCount = group.rows.filter((r) => r.tier === "VIP").length;
-              const gaSold = group.rows.length - vipCount;
-              const vipSold = vipHidden ? TIER_LIMITS.vip : vipCount;
-              const tiers: Array<{ label: string; sold: number; limit: number }> = [
-                { label: "GA", sold: gaSold, limit: TIER_LIMITS.ga },
-                { label: "VIP", sold: vipSold, limit: TIER_LIMITS.vip },
-              ];
-              return (
-                <div className="mb-3 flex flex-wrap items-center gap-4 rounded-lg border border-primary/40 bg-primary/5 p-3 text-sm">
-                  <Ticket className="h-4 w-4 text-primary" />
-                  {tiers.map((t) => {
-                    const remaining = Math.max(t.limit - t.sold, 0);
-                    return (
-                      <span key={t.label} className="flex items-center gap-1.5">
-                        <span className="font-semibold">{t.label} tickets:</span>
-                        <span>
-                          {t.sold} / {t.limit} sold
+              {(() => {
+                // Seats sold per tier = number of event-tagged contacts in
+                // this cohort. VIP = VIP-tier contacts; GA = everyone else
+                // (GA buyers + attendees, since VIP is single-seat). A
+                // GA-only cohort (e.g. Nashville) has no VIP inventory, so
+                // its VIP tier is shown sold out.
+                const vipHidden = !isVipOffered(group.slug);
+                const vipCount = group.rows.filter((r) => r.tier === "VIP").length;
+                const gaSold = group.rows.length - vipCount;
+                const vipSold = vipHidden ? TIER_LIMITS.vip : vipCount;
+                const tiers: Array<{ label: string; sold: number; limit: number }> = [
+                  { label: "GA", sold: gaSold, limit: TIER_LIMITS.ga },
+                  { label: "VIP", sold: vipSold, limit: TIER_LIMITS.vip },
+                ];
+                return (
+                  <div className="mb-3 flex flex-wrap items-center gap-4 rounded-lg border border-primary/40 bg-primary/5 p-3 text-sm">
+                    <Ticket className="h-4 w-4 text-primary" />
+                    {tiers.map((t) => {
+                      const remaining = Math.max(t.limit - t.sold, 0);
+                      return (
+                        <span key={t.label} className="flex items-center gap-1.5">
+                          <span className="font-semibold">{t.label} tickets:</span>
+                          <span>
+                            {t.sold} / {t.limit} sold
+                          </span>
+                          <span className={remaining > 0 ? "text-primary" : "text-destructive"}>
+                            · {remaining > 0 ? `${remaining} available` : "Sold out"}
+                          </span>
                         </span>
-                        <span className={remaining > 0 ? "text-primary" : "text-destructive"}>
-                          · {remaining > 0 ? `${remaining} available` : "Sold out"}
-                        </span>
-                      </span>
-                    );
-                  })}
-                </div>
-              );
-            })()}
+                      );
+                    })}
+                  </div>
+                );
+              })()}
 
-            <Card className="overflow-hidden">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Email</TableHead>
-                    <TableHead>Phone</TableHead>
-                    <TableHead>Tier</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead className="text-center">Tickets Purchased</TableHead>
-                    <TableHead className="text-center">Unassigned Tickets</TableHead>
-                    <TableHead>Purchased On</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {group.rows.map((p) => {
-                    const qty = p.ticketQuantity || 0;
-                    // Buyer = 1 seat; remaining = total − buyer − attendees already added.
-                    const remaining =
-                      !p.isAttendee && qty > 0 ? Math.max(qty - 1 - p.attendeesAdded, 0) : 0;
-                    return (
-                      <TableRow
-                        key={p.id || p.email}
-                        className="cursor-pointer"
-                        onClick={() => setSelected(p)}
-                      >
-                        <TableCell className="font-medium">{p.name || "—"}</TableCell>
-                        <TableCell className="text-muted-foreground">{p.email || "—"}</TableCell>
-                        <TableCell className="text-muted-foreground">{p.phone || "—"}</TableCell>
-                        <TableCell>{p.tier || "—"}</TableCell>
-                        <TableCell>
-                          {p.isAttendee ? (
-                            <Badge variant="outline" className="text-[10px]">
-                              attendee
-                            </Badge>
-                          ) : (
-                            <Badge variant="secondary" className="text-[10px]">
-                              buyer
-                            </Badge>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-center font-medium">
-                          {p.isAttendee ? "—" : qty > 0 ? qty : "—"}
-                        </TableCell>
-                        <TableCell className="text-center">
-                          {p.isAttendee || qty === 0 ? (
-                            "—"
-                          ) : (
-                            <span
-                              className={
-                                remaining > 0
-                                  ? "font-semibold text-primary"
-                                  : "text-muted-foreground"
-                              }
-                            >
-                              {remaining}
-                            </span>
-                          )}
-                        </TableCell>
-                        <TableCell className="whitespace-nowrap text-muted-foreground">
-                          {formatPurchaseDate(p.dateAdded)}
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </Card>
-          </section>
-        ))}
-      </div>
+              <Card className="overflow-hidden">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Name</TableHead>
+                      <TableHead>Email</TableHead>
+                      <TableHead>Phone</TableHead>
+                      <TableHead>Tier</TableHead>
+                      <TableHead>Type</TableHead>
+                      <TableHead className="text-center">Tickets Purchased</TableHead>
+                      <TableHead className="text-center">Unassigned Tickets</TableHead>
+                      <TableHead>Purchased On</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {group.rows.map((p) => {
+                      const qty = p.ticketQuantity || 0;
+                      // Buyer = 1 seat; remaining = total − buyer − attendees already added.
+                      const remaining =
+                        !p.isAttendee && qty > 0 ? Math.max(qty - 1 - p.attendeesAdded, 0) : 0;
+                      return (
+                        <TableRow
+                          key={p.id || p.email}
+                          className="cursor-pointer"
+                          onClick={() => setSelected(p)}
+                        >
+                          <TableCell className="font-medium">{p.name || "—"}</TableCell>
+                          <TableCell className="text-muted-foreground">{p.email || "—"}</TableCell>
+                          <TableCell className="text-muted-foreground">{p.phone || "—"}</TableCell>
+                          <TableCell>{p.tier || "—"}</TableCell>
+                          <TableCell>
+                            {p.isAttendee ? (
+                              <Badge variant="outline" className="text-[10px]">
+                                attendee
+                              </Badge>
+                            ) : (
+                              <Badge variant="secondary" className="text-[10px]">
+                                buyer
+                              </Badge>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-center font-medium">
+                            {p.isAttendee ? "—" : qty > 0 ? qty : "—"}
+                          </TableCell>
+                          <TableCell className="text-center">
+                            {p.isAttendee || qty === 0 ? (
+                              "—"
+                            ) : (
+                              <span
+                                className={
+                                  remaining > 0
+                                    ? "font-semibold text-primary"
+                                    : "text-muted-foreground"
+                                }
+                              >
+                                {remaining}
+                              </span>
+                            )}
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap text-muted-foreground">
+                            {formatPurchaseDate(p.dateAdded)}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </Card>
+            </section>
+          ))}
+        </div>
+      )}
 
       <PurchaserDialog purchaser={selected} password={password} onClose={() => setSelected(null)} />
       <AddBuyerDialog
