@@ -35,7 +35,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { listEvents, verifyAdminPassword } from "@/lib/events.functions";
+import { listEvents, verifyAdminPassword, saveAdminEvents } from "@/lib/events.functions";
 import {
   listSeminarPurchasers,
   getPurchaserDetail,
@@ -48,7 +48,6 @@ import {
   type AttendeeRecord,
 } from "@/lib/ghl.functions";
 import { getTodayISO, splitEvents, isVipOffered, slugify, type EventRow } from "@/lib/events";
-import { loadStoredEvents, saveStoredEvents } from "@/lib/events.store";
 
 export const Route = createFileRoute("/admin")({
   head: () => ({
@@ -239,10 +238,12 @@ function AdminPage() {
     }
   }, [purchasersFn, password]);
 
-  // Hydrate from this browser's saved edits once mounted.
+  // Events come from Supabase via the loader; keep local state in sync if it changes.
   useEffect(() => {
-    setEvents(loadStoredEvents(initialEvents));
+    setEvents(initialEvents);
   }, [initialEvents]);
+  const saveEventsFn = useServerFn(saveAdminEvents);
+  const [eventsError, setEventsError] = useState<string | null>(null);
 
   const today = getTodayISO();
   const { upcoming, past } = splitEvents(events, today);
@@ -262,9 +263,15 @@ function AdminPage() {
     }
   }
 
-  function persist(next: EventRow[]) {
+  // Persist the full event list to Supabase (shared across all visitors).
+  async function persist(next: EventRow[]) {
     setEvents(next);
-    saveStoredEvents(next);
+    setEventsError(null);
+    try {
+      await saveEventsFn({ data: { password, events: next } });
+    } catch (err) {
+      setEventsError(err instanceof Error ? err.message : "Failed to save events.");
+    }
   }
 
   function editField(slug: string, key: keyof EventRow, value: string) {
@@ -272,9 +279,14 @@ function AdminPage() {
     setSaveState("idle");
   }
 
-  function saveAll() {
-    saveStoredEvents(events);
-    setSaveState("saved");
+  async function saveAll() {
+    setEventsError(null);
+    try {
+      await saveEventsFn({ data: { password, events } });
+      setSaveState("saved");
+    } catch (err) {
+      setEventsError(err instanceof Error ? err.message : "Failed to save events.");
+    }
   }
 
   function addEvent() {
@@ -384,6 +396,11 @@ function AdminPage() {
                 {saveState === "saved" ? "Saved" : "Save changes"}
               </Button>
             </div>
+            {eventsError && (
+              <p className="mb-4 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+                {eventsError}
+              </p>
+            )}
 
             {/* Past events */}
             {past.length > 0 && (

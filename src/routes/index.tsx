@@ -7,7 +7,6 @@ import { Card } from "@/components/ui/card";
 import { getEventAvailability, type EventAvailability } from "@/lib/ghl.functions";
 import { listEvents } from "@/lib/events.functions";
 import { getTodayISO, splitEvents, isVipOffered, type EventRow } from "@/lib/events";
-import { loadStoredEvents } from "@/lib/events.store";
 import logo from "@/assets/hero-banner.webp";
 import coachesHero from "@/assets/hero-coaches.jpg";
 import davidImg from "@/assets/david-peterson.webp";
@@ -165,14 +164,11 @@ function scrollToHero() {
 
 function Index() {
   const { events: loaderEvents } = Route.useLoaderData();
-  const [allEvents, setAllEvents] = useState(loaderEvents);
+  // Events come from Supabase (via the server loader) — shared across all visitors.
+  const allEvents = loaderEvents;
   // No event expanded by default — visitors pick an event to slide its offer
   // section open.
   const [openEvent, setOpenEvent] = useState<number | null>(null);
-  // Pick up this browser's admin edits (localStorage) after hydration.
-  useEffect(() => {
-    setAllEvents(loadStoredEvents(loaderEvents));
-  }, [loaderEvents]);
   // When an event is expanded (via user click), scroll its ticket tiers into view.
   const didMount = useRef(false);
   useEffect(() => {

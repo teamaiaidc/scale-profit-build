@@ -15,7 +15,6 @@ import {
   type EventAvailability,
 } from "@/lib/ghl.functions";
 import { listEvents } from "@/lib/events.functions";
-import { loadStoredEvents } from "@/lib/events.store";
 import { getTodayISO, splitEvents, isVipOffered, type EventRow } from "@/lib/events";
 import { normalizeCity } from "@/lib/city";
 import { US_STATES, normalizeUsState } from "@/lib/us-states";
@@ -120,7 +119,8 @@ const GHL_FORM_EMBED_JS = "https://go.aiaimastermind.com/js/form_embed.js";
 function CheckoutPage() {
   const { city, tier, email: emailFromUrl } = Route.useSearch();
   const { events: loaderEvents, ghlProducts } = Route.useLoaderData();
-  const [events, setEvents] = useState(loaderEvents);
+  // Events come from Supabase (via the server loader) — shared across all visitors.
+  const events = loaderEvents;
 
   // Live pricing pulled from the two GHL products (fall back to built-in values).
   const live = useMemo(() => {
@@ -166,10 +166,6 @@ function CheckoutPage() {
 
   // GA options come from GHL when available, else the built-in table.
   const gaOptions = live.gaTiers ?? GA_QTY;
-  // Pick up this browser's admin edits (localStorage) after hydration.
-  useEffect(() => {
-    setEvents(loadStoredEvents(loaderEvents));
-  }, [loaderEvents]);
   // Build the city map from live event data, falling back to the hardcoded defaults.
   const cities = useMemo(() => {
     const map: Record<string, { name: string; date: string; venue: string; address: string }> = {
