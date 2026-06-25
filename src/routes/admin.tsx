@@ -1113,6 +1113,8 @@ function PurchaserDialog({
           tier: p.tier === "VIP" ? "vip" : "ga",
           attendees: cleaned,
           buyerContactId: p.id || undefined,
+          buyerName:
+            p.name || [p.firstName, p.lastName].filter(Boolean).join(" ").trim() || undefined,
         },
       });
       setAddedCount((c) => c + res.saved);

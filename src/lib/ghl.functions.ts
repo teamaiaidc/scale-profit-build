@@ -76,6 +76,9 @@ const OPP_FIELD_KEYS = {
   cohortVenue: "sp_cohort_venue",
   cohortAddress: "sp_cohort_address",
   cohortTime: "sp_cohort_time",
+  // Name of the buyer who purchased this attendee's ticket, set when the admin
+  // registers an additional attendee → {{opportunity.cpsp_ticket_purchaser}}.
+  ticketPurchaser: "cpsp_ticket_purchaser",
 } as const;
 
 const GA_PRICE_TIERS = [
@@ -889,6 +892,9 @@ const addAttendeesSchema = z.object({
   // The buyer these attendees belong to — so we can persist a running
   // "attendees added" count on the buyer for the admin's remaining counter.
   buyerContactId: z.string().max(100).optional(),
+  // The buyer's display name, recorded on each attendee's opportunity as the
+  // ticket purchaser ({{opportunity.cpsp_ticket_purchaser}}).
+  buyerName: z.string().max(200).optional(),
 });
 
 export const addAttendeesToGhl = createServerFn({ method: "POST" })
@@ -948,6 +954,43 @@ export const addAttendeesToGhl = createServerFn({ method: "POST" })
         console.warn("GHL attendees-added update failed:", (err as Error).message);
       }
     }
+
+    // Record the buyer (ticket purchaser) on each attendee's opportunity, so GHL
+    // can merge {{opportunity.cpsp_ticket_purchaser}} (e.g. in attendee emails).
+    // Best-effort: needs at least one pipeline; skipped silently otherwise.
+    if (data.buyerName && saved > 0) {
+      try {
+        const pipelines = (await ghlFetch(
+          `/opportunities/pipelines?locationId=${GHL_LOCATION_ID}`,
+          { method: "GET" },
+        )) as { pipelines?: Array<{ id: string; stages?: Array<{ id: string }> }> };
+        const pipeline = pipelines.pipelines?.[0];
+        const stageId = pipeline?.stages?.[0]?.id;
+        if (pipeline && stageId) {
+          await Promise.allSettled(
+            savedAttendees.map((a) =>
+              ghlFetch("/opportunities/", {
+                method: "POST",
+                body: JSON.stringify({
+                  locationId: GHL_LOCATION_ID,
+                  pipelineId: pipeline.id,
+                  pipelineStageId: stageId,
+                  name: `${a.firstName} ${a.lastName} — Attendee (${data.city})`,
+                  status: "open",
+                  contactId: a.id,
+                  customFields: [
+                    { key: OPP_FIELD_KEYS.ticketPurchaser, field_value: data.buyerName },
+                  ],
+                }),
+              }),
+            ),
+          );
+        }
+      } catch (err) {
+        console.warn("GHL attendee opportunity create failed:", (err as Error).message);
+      }
+    }
+
     return { ok: failed === 0, saved, failed, attendees: savedAttendees };
   });
 
