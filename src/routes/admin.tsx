@@ -45,7 +45,7 @@ import {
   type PurchaserDetail,
   type AttendeeRecord,
 } from "@/lib/ghl.functions";
-import { getTodayISO, splitEvents, isVipOffered, slugify, type EventRow } from "@/lib/events";
+import { getTodayISO, splitEvents, slugify, type EventRow } from "@/lib/events";
 
 export const Route = createFileRoute("/admin")({
   head: () => ({
@@ -676,15 +676,13 @@ function PurchasesView({
             </div>
 
             {(() => {
-              // Seats sold per tier = number of event-tagged contacts in
-              // this cohort. VIP = VIP-tier contacts; GA = everyone else
-              // (GA buyers + attendees, since VIP is single-seat). A
-              // GA-only cohort (e.g. Nashville) has no VIP inventory, so
-              // its VIP tier is shown sold out.
-              const vipHidden = !isVipOffered(group.slug);
-              const vipCount = group.rows.filter((r) => r.tier === "VIP").length;
-              const gaSold = group.rows.length - vipCount;
-              const vipSold = vipHidden ? TIER_LIMITS.vip : vipCount;
+              // Counts are by the ACTUAL tier tag on each contact:
+              //   GA  = contacts tagged 🤝 s&p-ga-{city}-{date}
+              //   VIP = contacts tagged 🤝 s&p-vip-{city}-{date}
+              // (tier is read straight from the tag). Contacts whose tag has no
+              // recognizable tier count toward neither.
+              const gaSold = group.rows.filter((r) => r.tier === "General Admission").length;
+              const vipSold = group.rows.filter((r) => r.tier === "VIP").length;
               const tiers: Array<{ label: string; sold: number; limit: number }> = [
                 { label: "GA", sold: gaSold, limit: TIER_LIMITS.ga },
                 { label: "VIP", sold: vipSold, limit: TIER_LIMITS.vip },

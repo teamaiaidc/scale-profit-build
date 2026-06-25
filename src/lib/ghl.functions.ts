@@ -1613,9 +1613,10 @@ export const tagBuyerForEvent = createServerFn({ method: "POST" })
 export const TIER_LIMITS = { ga: 100, vip: 20 } as const;
 export type Tier = keyof typeof TIER_LIMITS;
 
-// Split a set of event-tagged contacts into GA vs VIP seat counts, using the same
-// tier/event derivation as the admin Attendees list. `slug` filters to contacts
-// whose event tag actually resolves to this event.
+// Split a set of event-tagged contacts into GA vs VIP seat counts by their ACTUAL
+// tier tag (🤝 s&p-ga-… vs 🤝 s&p-vip-…). `slug` filters to contacts whose event
+// tag resolves to this event; a contact with no recognizable tier counts toward
+// neither, so each tier reflects its real tag count.
 export function countSeatsByTier(
   contacts: Array<{ tags?: string[]; opportunities?: Array<{ name?: string }> }>,
   slug: string,
@@ -1625,8 +1626,9 @@ export function countSeatsByTier(
   for (const c of contacts) {
     const tags = (c.tags ?? []).map((t) => String(t));
     if (deriveEventSlug(tags) !== slug) continue;
-    if (deriveTier(tags, c.opportunities) === "VIP") vip++;
-    else ga++;
+    const tier = deriveTier(tags, c.opportunities);
+    if (tier === "VIP") vip++;
+    else if (tier === "General Admission") ga++;
   }
   return { ga, vip };
 }
