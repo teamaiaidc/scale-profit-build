@@ -1027,12 +1027,13 @@ export const revokeAttendeeFromBuyer = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => revokeAttendeeSchema.parse(d))
   .handler(async ({ data }) => {
     assertAdmin(data.password);
-    // 1. Remove the event tag from the attendee (keep the contact).
+    // 1. Remove the event tag AND the sponsored-agent tag from the attendee
+    // (keep the contact) so they no longer count as a seat / sponsored agent.
     const tag = eventTag(data.tier ?? "ga", data.city, data.endDate);
     try {
       await ghlFetch(`/contacts/${data.attendeeId}/tags`, {
         method: "DELETE",
-        body: JSON.stringify({ tags: [tag] }),
+        body: JSON.stringify({ tags: [tag, SPONSORED_AGENT_TAG] }),
       });
     } catch (err) {
       console.warn("GHL attendee untag failed:", (err as Error).message);
