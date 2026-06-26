@@ -47,6 +47,7 @@ import {
   type AttendeeRecord,
 } from "@/lib/ghl.functions";
 import { getTodayISO, splitEvents, slugify, type EventRow } from "@/lib/events";
+import { US_STATES, normalizeUsState } from "@/lib/us-states";
 
 export const Route = createFileRoute("/admin")({
   head: () => ({
@@ -1157,6 +1158,20 @@ function PurchaserDialog({
       setSaveError("Phone number is required for each attendee.");
       return;
     }
+    // State is optional, but if provided it must be a real U.S. state; normalize
+    // it to the canonical name (same rule as the checkout page).
+    for (const a of cleaned) {
+      if (a.agencyState) {
+        const norm = normalizeUsState(a.agencyState);
+        if (!norm) {
+          setSaveError(
+            'Please pick a valid U.S. state for each attendee (e.g. "TX" or "Texas"), or leave it blank.',
+          );
+          return;
+        }
+        a.agencyState = norm;
+      }
+    }
     setSaveError(null);
     setSaving(true);
     try {
@@ -1370,6 +1385,8 @@ function PurchaserDialog({
                           Optional details
                         </p>
                         <Input
+                          list="admin-us-states"
+                          autoComplete="address-level1"
                           placeholder='State (e.g. "TX" or "Texas")'
                           value={a.agencyState}
                           onChange={(e) => setRow(i, "agencyState", e.target.value)}
@@ -1432,6 +1449,11 @@ function PurchaserDialog({
                       </div>
                     ))}
                   </div>
+                  <datalist id="admin-us-states">
+                    {US_STATES.map((s) => (
+                      <option key={s.abbr} value={s.name} />
+                    ))}
+                  </datalist>
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     <Button
                       variant="outline"
