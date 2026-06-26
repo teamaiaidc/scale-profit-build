@@ -994,8 +994,27 @@ function PurchaserDialog({
   const [loading, setLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
 
-  type NewAttendee = { firstName: string; lastName: string; email: string };
-  const emptyAttendee: NewAttendee = { firstName: "", lastName: "", email: "" };
+  type NewAttendee = {
+    firstName: string;
+    lastName: string;
+    email: string;
+    phone: string;
+    agencyState: string;
+    hasMoa: string;
+    attendedBefore: string;
+    shirtSize: string;
+  };
+  const emptyAttendee: NewAttendee = {
+    firstName: "",
+    lastName: "",
+    email: "",
+    phone: "",
+    agencyState: "",
+    hasMoa: "",
+    attendedBefore: "",
+    shirtSize: "",
+  };
+  const SHIRT_SIZES = ["Small", "Medium", "Large", "XL", "XXL", "XXXL"];
   const [extraAttendees, setExtraAttendees] = useState<NewAttendee[]>([{ ...emptyAttendee }]);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -1098,10 +1117,20 @@ function PurchaserDialog({
         firstName: a.firstName.trim(),
         lastName: a.lastName.trim(),
         email: a.email.trim(),
+        phone: a.phone.trim(),
+        agencyState: a.agencyState.trim() || undefined,
+        hasMoa: a.hasMoa || undefined,
+        attendedBefore: a.attendedBefore || undefined,
+        shirtSize: a.shirtSize || undefined,
       }))
       .filter((a) => a.firstName && a.lastName && a.email);
     if (cleaned.length === 0) {
-      setSaveError("Please fill in at least one attendee.");
+      setSaveError("Please fill in at least one attendee (first name, last name, email).");
+      return;
+    }
+    // Phone is required for each attendee being saved.
+    if (cleaned.some((a) => !a.phone)) {
+      setSaveError("Phone number is required for each attendee.");
       return;
     }
     setSaveError(null);
@@ -1276,6 +1305,77 @@ function PurchaserDialog({
                           value={a.email}
                           onChange={(e) => setRow(i, "email", e.target.value)}
                         />
+                        <Input
+                          type="tel"
+                          placeholder="Phone *"
+                          value={a.phone}
+                          onChange={(e) => setRow(i, "phone", e.target.value)}
+                        />
+
+                        {/* Optional survey questions (same as checkout) */}
+                        <p className="pt-1 text-[11px] uppercase tracking-wide text-muted-foreground">
+                          Optional details
+                        </p>
+                        <Input
+                          placeholder='State (e.g. "TX" or "Texas")'
+                          value={a.agencyState}
+                          onChange={(e) => setRow(i, "agencyState", e.target.value)}
+                        />
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          <div className="space-y-1">
+                            <p className="text-[11px] text-muted-foreground">Do you have a MOA?</p>
+                            <div className="flex gap-3 text-sm">
+                              {["Yes", "No"].map((opt) => (
+                                <label key={opt} className="flex items-center gap-1.5">
+                                  <input
+                                    type="radio"
+                                    name={`moa-${i}`}
+                                    className="accent-primary"
+                                    checked={a.hasMoa === opt}
+                                    onChange={() => setRow(i, "hasMoa", opt)}
+                                  />
+                                  {opt}
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-[11px] text-muted-foreground">
+                              Attended a seminar before?
+                            </p>
+                            <div className="flex gap-3 text-sm">
+                              {["Yes", "No"].map((opt) => (
+                                <label key={opt} className="flex items-center gap-1.5">
+                                  <input
+                                    type="radio"
+                                    name={`attended-${i}`}
+                                    className="accent-primary"
+                                    checked={a.attendedBefore === opt}
+                                    onChange={() => setRow(i, "attendedBefore", opt)}
+                                  />
+                                  {opt}
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-[11px] text-muted-foreground">Shirt size</p>
+                          <div className="flex flex-wrap gap-x-3 gap-y-1">
+                            {SHIRT_SIZES.map((size) => (
+                              <label key={size} className="flex items-center gap-1.5 text-sm">
+                                <input
+                                  type="radio"
+                                  name={`shirt-${i}`}
+                                  className="accent-primary"
+                                  checked={a.shirtSize === size}
+                                  onChange={() => setRow(i, "shirtSize", size)}
+                                />
+                                {size}
+                              </label>
+                            ))}
+                          </div>
+                        </div>
                       </div>
                     ))}
                   </div>

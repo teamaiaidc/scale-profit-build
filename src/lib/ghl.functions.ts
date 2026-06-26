@@ -883,6 +883,32 @@ async function readBuyerAttendeeList(
   }
 }
 
+// Build contact custom-field update entries, resolving each field's GHL field ID
+// by key when possible. The contact-update endpoint persists reliably by id; some
+// fields don't update by key alone, which is why a count can silently fail to
+// save. Falls back to key when the id can't be resolved.
+async function contactFieldEntries(
+  entries: Array<{ key: string; value: string }>,
+): Promise<Array<{ id?: string; key?: string; field_value: string }>> {
+  const meta = await getFieldMeta();
+  const idByKey = new Map<string, string>();
+  for (const [id, m] of meta) idByKey.set(m.key, id);
+  return entries.map((e) => {
+    const id = idByKey.get(e.key);
+    return id ? { id, field_value: e.value } : { key: e.key, field_value: e.value };
+  });
+}
+
+// Admin-registered attendee: name + email + required phone, plus the optional
+// survey answers (same questions as checkout).
+const adminAttendeeSchema = attendeeSchema.extend({
+  phone: z.string().min(3).max(30),
+  agencyState: z.string().max(100).optional(),
+  hasMoa: z.string().max(20).optional(),
+  attendedBefore: z.string().max(500).optional(),
+  shirtSize: z.string().max(20).optional(),
+});
+
 // Each ticket becomes its own attendee contact, collected on the confirmation
 // page after payment (when the real ticket count is known).
 const addAttendeesSchema = z.object({
@@ -894,7 +920,7 @@ const addAttendeesSchema = z.object({
   tier: z.enum(["ga", "vip"]),
   // ISO end date (YYYY-MM-DD); falls back to the slug's default if omitted.
   endDate: z.string().max(20).optional(),
-  attendees: z.array(attendeeSchema).min(1).max(20),
+  attendees: z.array(adminAttendeeSchema).min(1).max(20),
   // The buyer these attendees belong to — so we can persist a running
   // "attendees added" count on the buyer for the admin's remaining counter.
   buyerContactId: z.string().max(100).optional(),
@@ -919,8 +945,19 @@ export const addAttendeesToGhl = createServerFn({ method: "POST" })
             firstName: a.firstName,
             lastName: a.lastName,
             email: a.email,
+            phone: a.phone,
+            // Agency state → native State field; survey → custom fields (same as
+            // the buyer's checkout survey). All optional except phone.
+            ...(a.agencyState ? { state: a.agencyState } : {}),
             tags,
             source: "Scale & Profit Seminar Attendee",
+            customFields: [
+              ...(a.hasMoa ? [{ key: FIELD_KEYS.hasMoa, field_value: a.hasMoa }] : []),
+              ...(a.attendedBefore
+                ? [{ key: FIELD_KEYS.attendedBefore, field_value: a.attendedBefore }]
+                : []),
+              ...(a.shirtSize ? [{ key: FIELD_KEYS.shirtSize, field_value: a.shirtSize }] : []),
+            ],
           }),
         }),
       ),
@@ -933,7 +970,13 @@ export const addAttendeesToGhl = createServerFn({ method: "POST" })
       const body = r.value as { contact?: { id?: string }; id?: string };
       const id = body.contact?.id ?? body.id ?? "";
       const a = toAdd[i];
-      if (id) savedAttendees.push({ id, ...a });
+      if (id)
+        savedAttendees.push({
+          id,
+          firstName: a.firstName,
+          lastName: a.lastName,
+          email: a.email,
+        });
     });
     const saved = savedAttendees.length;
     const failed = results.length - saved;
@@ -947,14 +990,13 @@ export const addAttendeesToGhl = createServerFn({ method: "POST" })
       try {
         const existing = await readBuyerAttendeeList(data.buyerContactId);
         const list = [...existing.list, ...savedAttendees];
+        const customFields = await contactFieldEntries([
+          { key: FIELD_KEYS.attendeesAdded, value: String(existing.count + saved) },
+          { key: FIELD_KEYS.attendeesList, value: JSON.stringify(list) },
+        ]);
         await ghlFetch(`/contacts/${data.buyerContactId}`, {
           method: "PUT",
-          body: JSON.stringify({
-            customFields: [
-              { key: FIELD_KEYS.attendeesAdded, field_value: String(existing.count + saved) },
-              { key: FIELD_KEYS.attendeesList, field_value: JSON.stringify(list) },
-            ],
-          }),
+          body: JSON.stringify({ customFields }),
         });
       } catch (err) {
         console.warn("GHL attendees-added update failed:", (err as Error).message);
@@ -1043,14 +1085,13 @@ export const revokeAttendeeFromBuyer = createServerFn({ method: "POST" })
     const nextList = list.filter((a) => a.id !== data.attendeeId);
     const removed = nextList.length < list.length;
     const nextCount = Math.max(count - (removed ? 1 : 0), 0);
+    const customFields = await contactFieldEntries([
+      { key: FIELD_KEYS.attendeesAdded, value: String(nextCount) },
+      { key: FIELD_KEYS.attendeesList, value: JSON.stringify(nextList) },
+    ]);
     await ghlFetch(`/contacts/${data.buyerContactId}`, {
       method: "PUT",
-      body: JSON.stringify({
-        customFields: [
-          { key: FIELD_KEYS.attendeesAdded, field_value: String(nextCount) },
-          { key: FIELD_KEYS.attendeesList, field_value: JSON.stringify(nextList) },
-        ],
-      }),
+      body: JSON.stringify({ customFields }),
     });
     return { ok: true, attendeesAdded: nextCount };
   });
@@ -1325,7 +1366,11 @@ async function resolveBuyerCounts(
         valueOf(FIELD_KEYS.ticketQuantityLegacy3),
       10,
     );
-    attendeesAdded = Number.parseInt(valueOf(FIELD_KEYS.attendeesAdded), 10);
+    // Larger of the saved counter and the actual attendee-list length, so the
+    // count survives even if one of the two fields didn't persist.
+    const counter = Number.parseInt(valueOf(FIELD_KEYS.attendeesAdded), 10);
+    const listLen = parseAttendeeList(valueOf(FIELD_KEYS.attendeesList)).length;
+    attendeesAdded = Math.max(Number.isFinite(counter) && counter > 0 ? counter : 0, listLen);
   } catch (err) {
     console.warn("GHL contact count lookup failed:", (err as Error).message);
   }
@@ -1547,12 +1592,19 @@ export const getPurchaserDetail = createServerFn({ method: "POST" })
       10,
     );
     const oppTickets = await fetchOpportunityTicketCount(data.contactId, c.email ?? "");
-    const attendeesAdded = Number.parseInt(valueOf(FIELD_KEYS.attendeesAdded), 10);
+    const counterAdded = Number.parseInt(valueOf(FIELD_KEYS.attendeesAdded), 10);
+    const attendeeList = parseAttendeeList(valueOf(FIELD_KEYS.attendeesList));
+    // Use the larger of the saved counter and the actual list length, so the
+    // count survives even if one of the two fields didn't persist.
+    const attendeesAdded = Math.max(
+      Number.isFinite(counterAdded) && counterAdded > 0 ? counterAdded : 0,
+      attendeeList.length,
+    );
 
     return {
       ticketQuantity: Number.isFinite(contactQty) && contactQty > 0 ? contactQty : oppTickets,
-      attendeesAdded: Number.isFinite(attendeesAdded) && attendeesAdded > 0 ? attendeesAdded : 0,
-      attendees: parseAttendeeList(valueOf(FIELD_KEYS.attendeesList)),
+      attendeesAdded,
+      attendees: attendeeList,
       answers: {
         // Agency state lives in the native contact State field.
         agencyState: c.state ?? "",
