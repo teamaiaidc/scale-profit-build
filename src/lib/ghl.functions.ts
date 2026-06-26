@@ -15,6 +15,12 @@ const GHL_VERSION = "2021-07-28";
 // Buyer-vs-attendee is told apart by the contact `source`, not a tag.
 const EVENT_TAG_PREFIX = "🤝 s&p-";
 
+// Multi-ticket sponsorship tags, applied when the admin registers additional
+// attendees: the buyer becomes the sponsoring agent, each attendee a sponsored
+// agent.
+const SPONSORING_AGENT_TAG = "🤝 s&p-sponsoring-agent";
+const SPONSORED_AGENT_TAG = "🤝 s&p-sponsored-agent";
+
 // "2026-06-03" → "260603"; "" if the date isn't a full ISO date.
 function yymmdd(isoDate?: string): string {
   const m = (isoDate ?? "").match(/^\d{2}(\d{2})-(\d{2})-(\d{2})$/);
@@ -900,9 +906,9 @@ const addAttendeesSchema = z.object({
 export const addAttendeesToGhl = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => addAttendeesSchema.parse(d))
   .handler(async ({ data }) => {
-    // One centralized tag (🤝 s&p-{tier}-{city}-{yymmdd}) — same as the buyer.
-    // Buyer-vs-attendee is told apart by the contact `source`, not a tag.
-    const tags = [eventTag(data.tier, data.city, data.endDate)];
+    // The event tag (🤝 s&p-{tier}-{city}-{yymmdd}) — same as the buyer — plus the
+    // sponsored-agent tag marking them as someone else's extra ticket holder.
+    const tags = [eventTag(data.tier, data.city, data.endDate), SPONSORED_AGENT_TAG];
     const toAdd = data.attendees.filter((a) => a.email);
     const results = await Promise.allSettled(
       toAdd.map((a) =>
@@ -952,6 +958,15 @@ export const addAttendeesToGhl = createServerFn({ method: "POST" })
         });
       } catch (err) {
         console.warn("GHL attendees-added update failed:", (err as Error).message);
+      }
+      // Mark the buyer as the sponsoring agent (additive — never removes tags).
+      try {
+        await ghlFetch(`/contacts/${data.buyerContactId}/tags`, {
+          method: "POST",
+          body: JSON.stringify({ tags: [SPONSORING_AGENT_TAG] }),
+        });
+      } catch (err) {
+        console.warn("GHL sponsoring-agent tag failed:", (err as Error).message);
       }
     }
 
