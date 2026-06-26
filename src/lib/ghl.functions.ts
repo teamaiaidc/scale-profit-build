@@ -69,6 +69,10 @@ const FIELD_KEYS = {
   // email}), so the admin can see and individually REVOKE them. (Create this
   // contact custom field in GHL — large/multi-line text; absent → empty list.)
   attendeesList: "sp_attendees",
+  // Whether the buyer themselves is attending (uses 1 of their tickets). "no"
+  // means they bought all tickets for others. Absent → treated as attending.
+  // (Create this contact custom field in GHL — text; for persistence.)
+  buyerAttending: "sp_buyer_attending",
 } as const;
 
 // GHL *opportunity* custom-field keys (separate object/namespace from contact
@@ -1014,24 +1018,34 @@ export const addAttendeesToGhl = createServerFn({ method: "POST" })
 
     // Record the buyer (ticket purchaser) on each attendee's opportunity, so GHL
     // can merge {{opportunity.cpsp_ticket_purchaser}} (e.g. in attendee emails).
-    // Best-effort: needs at least one pipeline; skipped silently otherwise.
-    if (data.buyerName && saved > 0) {
+    // IMPORTANT: create the opportunity in the SAME pipeline + stage as the
+    // BUYER's own opportunity, so attendees land in this event's pipeline — never
+    // an arbitrary first pipeline (which would be a different event). If the buyer
+    // has no opportunity, we skip creation rather than guess a pipeline.
+    if (data.buyerName && data.buyerContactId && saved > 0) {
       try {
-        const pipelines = (await ghlFetch(
-          `/opportunities/pipelines?locationId=${GHL_LOCATION_ID}`,
+        const oppRes = (await ghlFetch(
+          `/opportunities/search?location_id=${GHL_LOCATION_ID}&contact_id=${data.buyerContactId}`,
           { method: "GET" },
-        )) as { pipelines?: Array<{ id: string; stages?: Array<{ id: string }> }> };
-        const pipeline = pipelines.pipelines?.[0];
-        const stageId = pipeline?.stages?.[0]?.id;
-        if (pipeline && stageId) {
+        )) as {
+          opportunities?: Array<{
+            pipelineId?: string;
+            pipelineStageId?: string;
+            stageId?: string;
+          }>;
+        };
+        const buyerOpp = oppRes.opportunities?.[0];
+        const pipelineId = buyerOpp?.pipelineId;
+        const pipelineStageId = buyerOpp?.pipelineStageId ?? buyerOpp?.stageId;
+        if (pipelineId && pipelineStageId) {
           await Promise.allSettled(
             savedAttendees.map((a) =>
               ghlFetch("/opportunities/", {
                 method: "POST",
                 body: JSON.stringify({
                   locationId: GHL_LOCATION_ID,
-                  pipelineId: pipeline.id,
-                  pipelineStageId: stageId,
+                  pipelineId,
+                  pipelineStageId,
                   name: `${a.firstName} ${a.lastName} — Attendee (${data.city})`,
                   status: "open",
                   contactId: a.id,
@@ -1042,6 +1056,8 @@ export const addAttendeesToGhl = createServerFn({ method: "POST" })
               }),
             ),
           );
+        } else {
+          console.warn("Skipped attendee opportunity create: buyer has no opportunity to mirror.");
         }
       } catch (err) {
         console.warn("GHL attendee opportunity create failed:", (err as Error).message);
@@ -1188,6 +1204,8 @@ export type PurchaserDetail = {
   ticketQuantity: number;
   attendeesAdded: number; // additional attendees already registered for this buyer
   attendees: AttendeeRecord[]; // the registered attendees (revocable individually)
+  buyerAttending: boolean; // whether the buyer uses 1 of their tickets (default true)
+  ticketPurchaser: string; // for attendees: who bought their ticket (opportunity field)
   answers: {
     agencyState: string;
     hasMoa: string;
@@ -1330,6 +1348,45 @@ async function fetchOpportunityTicketCount(contactId: string, email = ""): Promi
     console.warn("GHL opportunity fetch failed:", (err as Error).message);
     return 0;
   }
+}
+
+// Reads the ticket-purchaser name from a contact's opportunity
+// ({{opportunity.cpsp_ticket_purchaser}}) — for attendees, who bought their
+// ticket. Returns "" if not set.
+async function fetchOpportunityPurchaser(contactId: string): Promise<string> {
+  try {
+    const oppMeta = await getFieldMeta("opportunity");
+    let fieldId = "";
+    for (const [id, m] of oppMeta) {
+      if (m.key === OPP_FIELD_KEYS.ticketPurchaser) {
+        fieldId = id;
+        break;
+      }
+    }
+    const res = (await ghlFetch(
+      `/opportunities/search?location_id=${GHL_LOCATION_ID}&contact_id=${contactId}`,
+      { method: "GET" },
+    )) as {
+      opportunities?: Array<{
+        customFields?: Array<{
+          id?: string;
+          value?: unknown;
+          fieldValueString?: unknown;
+          field_value?: unknown;
+        }>;
+      }>;
+    };
+    for (const o of res.opportunities ?? []) {
+      for (const f of o.customFields ?? []) {
+        if (fieldId && f.id !== fieldId) continue;
+        const v = readCustomFieldValue(f);
+        if (v) return String(v);
+      }
+    }
+  } catch (err) {
+    console.warn("GHL purchaser field read failed:", (err as Error).message);
+  }
+  return "";
 }
 
 // Single source of truth for a buyer's counts — tickets purchased AND how many
@@ -1601,10 +1658,17 @@ export const getPurchaserDetail = createServerFn({ method: "POST" })
       attendeeList.length,
     );
 
+    // Buyer attending (uses 1 ticket) unless explicitly "no"; and the ticket
+    // purchaser recorded on this contact's opportunity (for attendees).
+    const buyerAttending = valueOf(FIELD_KEYS.buyerAttending).toLowerCase() !== "no";
+    const ticketPurchaser = await fetchOpportunityPurchaser(data.contactId);
+
     return {
       ticketQuantity: Number.isFinite(contactQty) && contactQty > 0 ? contactQty : oppTickets,
       attendeesAdded,
       attendees: attendeeList,
+      buyerAttending,
+      ticketPurchaser,
       answers: {
         // Agency state lives in the native contact State field.
         agencyState: c.state ?? "",
@@ -1614,6 +1678,28 @@ export const getPurchaserDetail = createServerFn({ method: "POST" })
       },
       customFields: fields.filter((x) => x.value),
     };
+  });
+
+const buyerAttendingSchema = z.object({
+  password: z.string().min(1).max(200),
+  contactId: z.string().min(1).max(100),
+  attending: z.boolean(),
+});
+
+// Admin: set whether the buyer themselves attends (uses 1 of their tickets).
+// Persisted on the buyer so the "unassigned tickets" math is right on reload.
+export const setBuyerAttending = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) => buyerAttendingSchema.parse(d))
+  .handler(async ({ data }) => {
+    assertAdmin(data.password);
+    const customFields = await contactFieldEntries([
+      { key: FIELD_KEYS.buyerAttending, value: data.attending ? "yes" : "no" },
+    ]);
+    await ghlFetch(`/contacts/${data.contactId}`, {
+      method: "PUT",
+      body: JSON.stringify({ customFields }),
+    });
+    return { ok: true as const, attending: data.attending };
   });
 
 const assignSchema = z.object({

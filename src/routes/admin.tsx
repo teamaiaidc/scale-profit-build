@@ -40,6 +40,7 @@ import {
   addAttendeesToGhl,
   revokeAttendeeFromBuyer,
   addManualBuyer,
+  setBuyerAttending,
   TIER_LIMITS,
   type SeminarPurchaser,
   type PurchaserDetail,
@@ -1025,6 +1026,10 @@ function PurchaserDialog({
   const [savedMsg, setSavedMsg] = useState<string | null>(null);
   const [revokingId, setRevokingId] = useState<string | null>(null);
   const [revokeError, setRevokeError] = useState<string | null>(null);
+  // Whether the buyer themselves is attending (uses 1 of their tickets). When
+  // false, all tickets are assignable to additional attendees.
+  const attendingFn = useServerFn(setBuyerAttending);
+  const [buyerAttending, setBuyerAttendingState] = useState(true);
 
   // Fetch the contact's custom fields when a row is opened (GHL's search
   // endpoint omits them, so this needs a per-contact call).
@@ -1043,12 +1048,14 @@ function PurchaserDialog({
     setRevokeError(null);
     setAttendees([]);
     setAddedCount(0);
+    setBuyerAttendingState(true);
     detailFn({ data: { password, contactId: p.id } })
       .then((res) => {
         if (!cancelled) {
           setDetail(res);
           setAttendees(res.attendees ?? []);
           setAddedCount(res.attendeesAdded ?? 0);
+          setBuyerAttendingState(res.buyerAttending ?? true);
         }
       })
       .catch((err) => {
@@ -1085,9 +1092,26 @@ function PurchaserDialog({
     : detail && detail.ticketQuantity > 0
       ? detail.ticketQuantity
       : null;
-  const additionalNeeded = ticketQty && ticketQty > 1 ? ticketQty - 1 : 0;
+  // Additional attendees to register = tickets minus 1 if the buyer attends.
+  // VIP is single-seat. If the buyer isn't attending, all tickets are assignable.
+  const additionalNeeded = isVipBuyer
+    ? 0
+    : ticketQty
+      ? Math.max(ticketQty - (buyerAttending ? 1 : 0), 0)
+      : 0;
   // Current registered count (updated live as the admin adds / revokes).
   const remaining = Math.max(additionalNeeded - addedCount, 0);
+
+  // Toggle whether the buyer attends (uses 1 ticket) — persisted to GHL.
+  const toggleBuyerAttending = async (attending: boolean) => {
+    if (!p?.id) return;
+    setBuyerAttendingState(attending);
+    try {
+      await attendingFn({ data: { password, contactId: p.id, attending } });
+    } catch {
+      /* best-effort; UI already updated for the session */
+    }
+  };
 
   // Auto-size attendee rows to match how many more guests still need to be added.
   useEffect(() => {
@@ -1203,17 +1227,46 @@ function PurchaserDialog({
                 {p.state && <InfoRow icon={<MapPin className="h-4 w-4" />} value={p.state} />}
               </div>
 
-              {/* Order summary */}
-              <div className="grid grid-cols-2 gap-3">
+              {/* Ticket purchaser — for attendees, who bought their ticket. */}
+              {p.isAttendee && (detail?.ticketPurchaser || loading) && (
                 <div className="rounded-lg border border-border p-3">
-                  <p className="text-xs text-muted-foreground">Tickets purchased</p>
-                  <p className="text-xl font-bold">{loading ? "…" : (ticketQty ?? "—")}</p>
+                  <p className="text-xs text-muted-foreground">Ticket purchased by</p>
+                  <p className="text-base font-semibold">
+                    {loading ? "…" : detail?.ticketPurchaser || "—"}
+                  </p>
                 </div>
-                <div className="rounded-lg border border-primary/40 bg-primary/5 p-3">
-                  <p className="text-xs text-muted-foreground">Unassigned tickets</p>
-                  <p className="text-xl font-bold text-primary">{loading ? "…" : remaining}</p>
-                </div>
-              </div>
+              )}
+
+              {/* Order summary — buyers only (attendees don't have their own
+                  ticket count / unassigned tickets). */}
+              {!p.isAttendee && (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="rounded-lg border border-border p-3">
+                      <p className="text-xs text-muted-foreground">Tickets purchased</p>
+                      <p className="text-xl font-bold">{loading ? "…" : (ticketQty ?? "—")}</p>
+                    </div>
+                    <div className="rounded-lg border border-primary/40 bg-primary/5 p-3">
+                      <p className="text-xs text-muted-foreground">Unassigned tickets</p>
+                      <p className="text-xl font-bold text-primary">{loading ? "…" : remaining}</p>
+                    </div>
+                  </div>
+
+                  {/* Buyer attending? Multi-ticket buyers can mark themselves as
+                      not attending so all tickets go to additional attendees. */}
+                  {!loading && ticketQty && ticketQty > 1 && (
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        className="accent-primary"
+                        checked={buyerAttending}
+                        onChange={(e) => toggleBuyerAttending(e.target.checked)}
+                      />
+                      Buyer is attending this event (uses 1 ticket)
+                    </label>
+                  )}
+                </>
+              )}
 
               {/* Registered attendees — each can be revoked, freeing its slot so
                   the ticket can be reassigned to someone else. */}
