@@ -2032,7 +2032,7 @@ function cohortRemainingNames(n: number): { ga: string; vip: string } {
 
 // Write the nearest-upcoming events (sorted, past dropped) into the GHL location
 // custom values — slot 1 = nearest:
-//   • cpsp_cohort_slot_1..4         → cohort info as JSON (for email merges)
+//   • cpsp_cohort_slot_1..4         → cohort info as one email-friendly line
 //   • CP-S&P: Remaining GA/VIP …    → remaining tickets per cohort (limit − sold)
 // Empty slots are cleared. Best-effort: matches existing custom values by key /
 // display name; any that don't exist in GHL are skipped (logged).
@@ -2080,16 +2080,10 @@ export async function syncCohortSlots(events: EventRow[]): Promise<{ updated: nu
     const n = i + 1;
     const names = cohortRemainingNames(n);
 
-    // Cohort info (JSON) for the slot.
-    const slotValue = ev
-      ? JSON.stringify({
-          city: ev.city,
-          date: ev.date,
-          venue: ev.venue,
-          address: ev.address,
-          end_date: ev.end_date,
-        })
-      : "";
+    // Cohort info as one email-friendly line, e.g.
+    // "Nashville — August 5th–6th, 2026 — W Nashville Hotel, 300 12th Ave S, …".
+    const place = [ev?.venue, ev?.address].filter(Boolean).join(", ");
+    const slotValue = ev ? [ev.city, ev.date, place].filter(Boolean).join(" — ") : "";
     if (await updateCv(COHORT_SLOT_KEYS[i], slotValue)) updated++;
 
     // Remaining tickets per tier = limit − tickets SOLD (sum of purchased
