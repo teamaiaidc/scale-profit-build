@@ -15,11 +15,10 @@ const GHL_VERSION = "2021-07-28";
 // Buyer-vs-attendee is told apart by the contact `source`, not a tag.
 const EVENT_TAG_PREFIX = "🤝 s&p-";
 
-// Multi-ticket sponsorship tags, applied when the admin registers additional
-// attendees: the buyer becomes the sponsoring agent, each attendee a sponsored
-// agent.
-const SPONSORING_AGENT_TAG = "🤝 s&p-sponsoring-agent";
-const SPONSORED_AGENT_TAG = "🤝 s&p-sponsored-agent";
+// Multi-ticket tags, applied when the admin registers additional attendees:
+// the buyer is marked a multiple-ticket buyer, each registered guest an attendee.
+const MULTI_TICKET_BUYER_TAG = "🤝 s&p-multipleticket-buyer";
+const ATTENDEE_TAG = "🤝 s&p-attendee";
 
 // "2026-06-03" → "260603"; "" if the date isn't a full ISO date.
 function yymmdd(isoDate?: string): string {
@@ -937,8 +936,8 @@ export const addAttendeesToGhl = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => addAttendeesSchema.parse(d))
   .handler(async ({ data }) => {
     // The event tag (🤝 s&p-{tier}-{city}-{yymmdd}) — same as the buyer — plus the
-    // sponsored-agent tag marking them as someone else's extra ticket holder.
-    const tags = [eventTag(data.tier, data.city, data.endDate), SPONSORED_AGENT_TAG];
+    // attendee tag marking them as someone else's extra ticket holder.
+    const tags = [eventTag(data.tier, data.city, data.endDate), ATTENDEE_TAG];
     const toAdd = data.attendees.filter((a) => a.email);
     const results = await Promise.allSettled(
       toAdd.map((a) =>
@@ -1009,10 +1008,10 @@ export const addAttendeesToGhl = createServerFn({ method: "POST" })
       try {
         await ghlFetch(`/contacts/${data.buyerContactId}/tags`, {
           method: "POST",
-          body: JSON.stringify({ tags: [SPONSORING_AGENT_TAG] }),
+          body: JSON.stringify({ tags: [MULTI_TICKET_BUYER_TAG] }),
         });
       } catch (err) {
-        console.warn("GHL sponsoring-agent tag failed:", (err as Error).message);
+        console.warn("GHL multiple-ticket-buyer tag failed:", (err as Error).message);
       }
     }
 
@@ -1085,13 +1084,13 @@ export const revokeAttendeeFromBuyer = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => revokeAttendeeSchema.parse(d))
   .handler(async ({ data }) => {
     assertAdmin(data.password);
-    // 1. Remove the event tag AND the sponsored-agent tag from the attendee
-    // (keep the contact) so they no longer count as a seat / sponsored agent.
+    // 1. Remove the event tag AND the attendee tag from the attendee (keep the
+    // contact) so they no longer count as a seat / registered attendee.
     const tag = eventTag(data.tier ?? "ga", data.city, data.endDate);
     try {
       await ghlFetch(`/contacts/${data.attendeeId}/tags`, {
         method: "DELETE",
-        body: JSON.stringify({ tags: [tag, SPONSORED_AGENT_TAG] }),
+        body: JSON.stringify({ tags: [tag, ATTENDEE_TAG] }),
       });
     } catch (err) {
       console.warn("GHL attendee untag failed:", (err as Error).message);
