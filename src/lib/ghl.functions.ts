@@ -61,17 +61,17 @@ const FIELD_KEYS = {
   attendedBefore: "have_you_attended_a_scale__profit_seminar_before_1",
   shirtSize: "scale__profit_shirt_size",
   // Running count of additional attendees the admin has registered for a buyer,
-  // so "tickets to add remaining" persists across reloads. (Create this contact
-  // custom field in GHL — number — for persistence; absent → treated as 0.)
-  attendeesAdded: "sp_attendees_added",
+  // so "tickets to add remaining" persists across reloads. GHL contact field
+  // (number) → {{contact.cpsp_no_of_attendees_added}}; absent → treated as 0.
+  attendeesAdded: "cpsp_no_of_attendees_added",
   // JSON list of the attendees registered for a buyer ({id,firstName,lastName,
-  // email}), so the admin can see and individually REVOKE them. (Create this
-  // contact custom field in GHL — large/multi-line text; absent → empty list.)
-  attendeesList: "sp_attendees",
+  // email}), so the admin can see and individually REVOKE them. GHL contact field
+  // (large/multi-line text) → {{contact.cpsp_name_of_attendees}}; absent → empty.
+  attendeesList: "cpsp_name_of_attendees",
   // Whether the buyer themselves is attending (uses 1 of their tickets). "no"
   // means they bought all tickets for others. Absent → treated as attending.
-  // (Create this contact custom field in GHL — text; for persistence.)
-  buyerAttending: "sp_buyer_attending",
+  // GHL contact field (text) → {{contact.cpsp_buyer_attending}}.
+  buyerAttending: "cpsp_buyer_attending",
 } as const;
 
 // GHL *opportunity* custom-field keys (separate object/namespace from contact
@@ -828,7 +828,7 @@ export const listGhlProducts = createServerFn({ method: "GET" }).handler(
 // ============== Post-purchase attendees ==============
 
 // One registered attendee belonging to a buyer. Persisted as a JSON list in the
-// buyer's sp_attendees field so the admin can list + revoke them individually.
+// buyer's cpsp_name_of_attendees field so the admin can list + revoke them.
 export type AttendeeRecord = {
   id: string;
   firstName: string;
@@ -836,7 +836,7 @@ export type AttendeeRecord = {
   email: string;
 };
 
-// Parse the buyer's sp_attendees JSON, tolerating empty/garbage values.
+// Parse the buyer's cpsp_name_of_attendees JSON, tolerating empty/garbage values.
 function parseAttendeeList(raw: string): AttendeeRecord[] {
   if (!raw.trim()) return [];
   try {
@@ -987,8 +987,8 @@ export const addAttendeesToGhl = createServerFn({ method: "POST" })
     // Persist the attendee list + running count on the buyer so the "unassigned
     // tickets" counter survives reloads AND the admin can revoke a specific
     // attendee later. Best-effort: skipped silently if the field/contact is
-    // missing. (Requires the sp_attendees_added [number] + sp_attendees [text]
-    // contact fields to exist in GHL.)
+    // missing. (Requires the cpsp_no_of_attendees_added [number] +
+    // cpsp_name_of_attendees [text] contact fields to exist in GHL.)
     if (data.buyerContactId && saved > 0) {
       try {
         const existing = await readBuyerAttendeeList(data.buyerContactId);
