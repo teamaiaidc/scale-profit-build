@@ -1049,14 +1049,14 @@ function PurchaserDialog({
     setRevokeError(null);
     setAttendees([]);
     setAddedCount(0);
-    setBuyerAttendingState(true);
+    setBuyerAttendingState(false);
     detailFn({ data: { password, contactId: p.id } })
       .then((res) => {
         if (!cancelled) {
           setDetail(res);
           setAttendees(res.attendees ?? []);
           setAddedCount(res.attendeesAdded ?? 0);
-          setBuyerAttendingState(res.buyerAttending ?? true);
+          setBuyerAttendingState(res.buyerAttending ?? false);
         }
       })
       .catch((err) => {
@@ -1183,6 +1183,7 @@ function PurchaserDialog({
           buyerContactId: p.id || undefined,
           buyerName:
             p.name || [p.firstName, p.lastName].filter(Boolean).join(" ").trim() || undefined,
+          buyerEmail: p.email || undefined,
         },
       });
       setAddedCount((c) => c + res.saved);
@@ -1243,12 +1244,15 @@ function PurchaserDialog({
               </div>
 
               {/* Ticket purchaser — for attendees, who bought their ticket. */}
-              {p.isAttendee && (detail?.ticketPurchaser || loading) && (
+              {p.isAttendee && (detail?.buyerName || detail?.buyerEmail || loading) && (
                 <div className="rounded-lg border border-border p-3">
                   <p className="text-xs text-muted-foreground">Ticket purchased by</p>
                   <p className="text-base font-semibold">
-                    {loading ? "…" : detail?.ticketPurchaser || "—"}
+                    {loading ? "…" : detail?.buyerName || "—"}
                   </p>
+                  {detail?.buyerEmail && (
+                    <p className="text-sm text-muted-foreground">{detail.buyerEmail}</p>
+                  )}
                 </div>
               )}
 

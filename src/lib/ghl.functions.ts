@@ -51,6 +51,9 @@ const FIELD_KEYS = {
   eventCity: "event_city",
   ticketTier: "ticket_tier",
   orderAmount: "order_amount",
+  // "Attendee" if the contact attends (single ticket, multi-ticket buyer who is
+  // attending, or a registered attendee); else "Buyer". → {{contact.cpsp_role}}.
+  role: "cpsp_role",
   // Real per-buyer ticket count, set by the GHL workflow (see docs §6).
   ticketQuantity: "sp_no_of_ticket_purchased",
   // Fallback keys read when the primary field is not yet populated.
@@ -85,9 +88,12 @@ const OPP_FIELD_KEYS = {
   cohortVenue: "sp_cohort_venue",
   cohortAddress: "sp_cohort_address",
   cohortTime: "sp_cohort_time",
-  // Name of the buyer who purchased this attendee's ticket, set when the admin
-  // registers an additional attendee → {{opportunity.cpsp_ticket_purchaser}}.
-  ticketPurchaser: "cpsp_ticket_purchaser",
+  // The buyer who purchased this attendee's ticket, set when the admin registers
+  // an additional attendee → {{opportunity.cpsp_buyer_name}} / cpsp_buyer_email.
+  buyerName: "cpsp_buyer_name",
+  buyerEmail: "cpsp_buyer_email",
+  // Tier purchased → {{opportunity.cpsp_ticket_tier}} ("General Admission" / "VIP").
+  ticketTier: "cpsp_ticket_tier",
 } as const;
 
 const GA_PRICE_TIERS = [
@@ -203,6 +209,9 @@ export const submitCheckoutToGhl = createServerFn({ method: "POST" })
           { key: FIELD_KEYS.ticketTier, field_value: tierLabel },
           ...ticketQuantityFields,
           { key: FIELD_KEYS.orderAmount, field_value: String(data.amount) },
+          // Single-ticket buyers attend their own ticket → Attendee. Multi-ticket
+          // buyers default to Buyer until the admin marks them attending.
+          { key: FIELD_KEYS.role, field_value: data.quantity === 1 ? "Attendee" : "Buyer" },
           ...(data.survey
             ? [
                 { key: FIELD_KEYS.hasMoa, field_value: data.survey.hasMoa },
@@ -258,6 +267,7 @@ export const submitCheckoutToGhl = createServerFn({ method: "POST" })
           const oppCustomFields: Array<{ key: string; field_value: string }> = [
             { key: OPP_FIELD_KEYS.ticketsPurchased, field_value: String(data.quantity) },
             { key: OPP_FIELD_KEYS.ticketsPurchasedLegacy, field_value: String(data.quantity) },
+            { key: OPP_FIELD_KEYS.ticketTier, field_value: tierLabel },
           ];
           const cohortPairs: Array<[string, string | undefined]> = [
             [OPP_FIELD_KEYS.cohortLocation, data.event?.name],
@@ -927,9 +937,10 @@ const addAttendeesSchema = z.object({
   // The buyer these attendees belong to — so we can persist a running
   // "attendees added" count on the buyer for the admin's remaining counter.
   buyerContactId: z.string().max(100).optional(),
-  // The buyer's display name, recorded on each attendee's opportunity as the
-  // ticket purchaser ({{opportunity.cpsp_ticket_purchaser}}).
+  // The buyer's name + email, recorded on each attendee's opportunity
+  // ({{opportunity.cpsp_buyer_name}} / cpsp_buyer_email).
   buyerName: z.string().max(200).optional(),
+  buyerEmail: z.string().max(200).optional(),
 });
 
 export const addAttendeesToGhl = createServerFn({ method: "POST" })
@@ -955,6 +966,7 @@ export const addAttendeesToGhl = createServerFn({ method: "POST" })
             tags,
             source: "Scale & Profit Seminar Attendee",
             customFields: [
+              { key: FIELD_KEYS.role, field_value: "Attendee" },
               ...(a.hasMoa ? [{ key: FIELD_KEYS.hasMoa, field_value: a.hasMoa }] : []),
               ...(a.attendedBefore
                 ? [{ key: FIELD_KEYS.attendedBefore, field_value: a.attendedBefore }]
@@ -1015,8 +1027,9 @@ export const addAttendeesToGhl = createServerFn({ method: "POST" })
       }
     }
 
-    // Record the buyer (ticket purchaser) on each attendee's opportunity, so GHL
-    // can merge {{opportunity.cpsp_ticket_purchaser}} (e.g. in attendee emails).
+    // Record the buyer name/email + tier on each attendee's opportunity, so GHL
+    // can merge {{opportunity.cpsp_buyer_name}} / cpsp_buyer_email /
+    // cpsp_ticket_tier (e.g. in attendee emails).
     // IMPORTANT: create the opportunity in the SAME pipeline + stage as the
     // BUYER's own opportunity, so attendees land in this event's pipeline — never
     // an arbitrary first pipeline (which would be a different event). If the buyer
@@ -1049,7 +1062,14 @@ export const addAttendeesToGhl = createServerFn({ method: "POST" })
                   status: "open",
                   contactId: a.id,
                   customFields: [
-                    { key: OPP_FIELD_KEYS.ticketPurchaser, field_value: data.buyerName },
+                    { key: OPP_FIELD_KEYS.buyerName, field_value: data.buyerName ?? "" },
+                    ...(data.buyerEmail
+                      ? [{ key: OPP_FIELD_KEYS.buyerEmail, field_value: data.buyerEmail }]
+                      : []),
+                    {
+                      key: OPP_FIELD_KEYS.ticketTier,
+                      field_value: data.tier === "vip" ? "VIP" : "General Admission",
+                    },
                   ],
                 }),
               }),
@@ -1152,6 +1172,8 @@ export const addManualBuyer = createServerFn({ method: "POST" })
           { key: FIELD_KEYS.ticketTier, field_value: tierLabel },
           { key: FIELD_KEYS.ticketQuantity, field_value: String(quantity) },
           { key: FIELD_KEYS.ticketQuantityLegacy, field_value: String(quantity) },
+          // Single-ticket buyer attends; multi-ticket defaults to Buyer.
+          { key: FIELD_KEYS.role, field_value: quantity === 1 ? "Attendee" : "Buyer" },
         ],
       }),
     })) as { contact?: { id?: string }; id?: string };
@@ -1204,7 +1226,8 @@ export type PurchaserDetail = {
   attendeesAdded: number; // additional attendees already registered for this buyer
   attendees: AttendeeRecord[]; // the registered attendees (revocable individually)
   buyerAttending: boolean; // whether the buyer uses 1 of their tickets (default true)
-  ticketPurchaser: string; // for attendees: who bought their ticket (opportunity field)
+  buyerName: string; // for attendees: who bought their ticket (opportunity field)
+  buyerEmail: string; // for attendees: the buyer's email (opportunity field)
   answers: {
     agencyState: string;
     hasMoa: string;
@@ -1349,18 +1372,17 @@ async function fetchOpportunityTicketCount(contactId: string, email = ""): Promi
   }
 }
 
-// Reads the ticket-purchaser name from a contact's opportunity
-// ({{opportunity.cpsp_ticket_purchaser}}) — for attendees, who bought their
-// ticket. Returns "" if not set.
-async function fetchOpportunityPurchaser(contactId: string): Promise<string> {
+// Reads the buyer (ticket purchaser) name + email from a contact's opportunity
+// ({{opportunity.cpsp_buyer_name}} / cpsp_buyer_email) — for attendees, who
+// bought their ticket. Returns "" for any field not set.
+async function fetchOpportunityBuyer(contactId: string): Promise<{ name: string; email: string }> {
   try {
     const oppMeta = await getFieldMeta("opportunity");
-    let fieldId = "";
+    let nameId = "";
+    let emailId = "";
     for (const [id, m] of oppMeta) {
-      if (m.key === OPP_FIELD_KEYS.ticketPurchaser) {
-        fieldId = id;
-        break;
-      }
+      if (m.key === OPP_FIELD_KEYS.buyerName) nameId = id;
+      else if (m.key === OPP_FIELD_KEYS.buyerEmail) emailId = id;
     }
     const res = (await ghlFetch(
       `/opportunities/search?location_id=${GHL_LOCATION_ID}&contact_id=${contactId}`,
@@ -1375,17 +1397,19 @@ async function fetchOpportunityPurchaser(contactId: string): Promise<string> {
         }>;
       }>;
     };
+    let name = "";
+    let email = "";
     for (const o of res.opportunities ?? []) {
       for (const f of o.customFields ?? []) {
-        if (fieldId && f.id !== fieldId) continue;
-        const v = readCustomFieldValue(f);
-        if (v) return String(v);
+        if (nameId && f.id === nameId && !name) name = String(readCustomFieldValue(f) ?? "");
+        if (emailId && f.id === emailId && !email) email = String(readCustomFieldValue(f) ?? "");
       }
     }
+    return { name, email };
   } catch (err) {
-    console.warn("GHL purchaser field read failed:", (err as Error).message);
+    console.warn("GHL buyer field read failed:", (err as Error).message);
+    return { name: "", email: "" };
   }
-  return "";
 }
 
 // Single source of truth for a buyer's counts — tickets purchased AND how many
@@ -1659,15 +1683,17 @@ export const getPurchaserDetail = createServerFn({ method: "POST" })
 
     // Buyer attending (uses 1 ticket) unless explicitly "no"; and the ticket
     // purchaser recorded on this contact's opportunity (for attendees).
-    const buyerAttending = valueOf(FIELD_KEYS.buyerAttending).toLowerCase() !== "no";
-    const ticketPurchaser = await fetchOpportunityPurchaser(data.contactId);
+    // Default = NOT attending (role "Buyer") until the admin marks them attending.
+    const buyerAttending = valueOf(FIELD_KEYS.buyerAttending).toLowerCase() === "yes";
+    const buyer = await fetchOpportunityBuyer(data.contactId);
 
     return {
       ticketQuantity: Number.isFinite(contactQty) && contactQty > 0 ? contactQty : oppTickets,
       attendeesAdded,
       attendees: attendeeList,
       buyerAttending,
-      ticketPurchaser,
+      buyerName: buyer.name,
+      buyerEmail: buyer.email,
       answers: {
         // Agency state lives in the native contact State field.
         agencyState: c.state ?? "",
@@ -1691,8 +1717,10 @@ export const setBuyerAttending = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => buyerAttendingSchema.parse(d))
   .handler(async ({ data }) => {
     assertAdmin(data.password);
+    // A multi-ticket buyer who's attending → Attendee; otherwise Buyer.
     const customFields = await contactFieldEntries([
       { key: FIELD_KEYS.buyerAttending, value: data.attending ? "yes" : "no" },
+      { key: FIELD_KEYS.role, value: data.attending ? "Attendee" : "Buyer" },
     ]);
     await ghlFetch(`/contacts/${data.contactId}`, {
       method: "PUT",

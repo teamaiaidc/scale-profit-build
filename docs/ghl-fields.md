@@ -22,21 +22,24 @@ confirm it exists in GHL or the value/merge-tag will be empty.
 | `cpsp_no_of_attendees_added` 🆕                      | Number          | # attendees registered (unassigned-ticket math) |
 | `cpsp_name_of_attendees` 🆕                          | Multi-line text | JSON list of registered attendees (revoke)      |
 | `cpsp_buyer_attending` 🆕                            | Text            | "yes"/"no" — does the buyer use 1 ticket        |
+| `cpsp_role` 🆕                                       | Text            | "Buyer" / "Attendee" (does the contact attend)  |
 
 > Agency **State**, **Phone**, **Email**, **Name** use GHL's native fields — nothing to create.
 
 ## Opportunity custom fields
 
-| Field key                   | Type   | Purpose                         |
-| --------------------------- | ------ | ------------------------------- |
-| `sp_no_of_ticket_purchased` | Number | Ticket count on opportunity     |
-| `sp2026ticket_quantity`     | Number | Ticket count on opportunity     |
-| `sp_cohort_location`        | Text   | Cohort city (email merge)       |
-| `sp_cohort_date`            | Text   | Cohort date                     |
-| `sp_cohort_venue`           | Text   | Cohort venue                    |
-| `sp_cohort_address`         | Text   | Cohort address                  |
-| `sp_cohort_time`            | Text   | Cohort time                     |
-| `cpsp_ticket_purchaser` 🆕  | Text   | Who bought an attendee's ticket |
+| Field key                   | Type   | Purpose                     |
+| --------------------------- | ------ | --------------------------- |
+| `sp_no_of_ticket_purchased` | Number | Ticket count on opportunity |
+| `sp2026ticket_quantity`     | Number | Ticket count on opportunity |
+| `sp_cohort_location`        | Text   | Cohort city (email merge)   |
+| `sp_cohort_date`            | Text   | Cohort date                 |
+| `sp_cohort_venue`           | Text   | Cohort venue                |
+| `sp_cohort_address`         | Text   | Cohort address              |
+| `sp_cohort_time`            | Text   | Cohort time                 |
+| `cpsp_buyer_name` 🆕        | Text   | Attendee's buyer name       |
+| `cpsp_buyer_email` 🆕       | Text   | Attendee's buyer email      |
+| `cpsp_ticket_tier` 🆕       | Text   | "General Admission" / "VIP" |
 
 ## Location custom values
 
