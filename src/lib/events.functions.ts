@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { DEFAULT_EVENTS, normalizeEvent, sortByDate, type EventRow } from "./events";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { syncCohortSlots } from "./ghl.functions";
 
 const EVENT_COLUMNS = "slug, city, date, end_date, venue, address, time, details, sort_order";
 
@@ -12,23 +13,28 @@ function db(): SupabaseClient {
   return supabaseAdmin as unknown as SupabaseClient;
 }
 
+// Read the event list from Supabase, falling back to DEFAULT_EVENTS if empty or
+// unreachable. Plain helper so both listEvents and the scheduled cohort sync can
+// use it.
+export async function readEvents(): Promise<EventRow[]> {
+  try {
+    const { data, error } = await db().from("events").select(EVENT_COLUMNS).order("sort_order");
+    if (error) throw error;
+    if (data && data.length > 0) {
+      return sortByDate(data.map((r) => normalizeEvent(r as Partial<EventRow>)));
+    }
+  } catch (err) {
+    console.warn("[readEvents] Supabase read failed, using defaults:", (err as Error).message);
+  }
+  return sortByDate(DEFAULT_EVENTS);
+}
+
 // The public site renders this list on the server for the initial paint.
 // Source of truth is the Supabase `events` table; if it's empty or unreachable
 // (e.g. not configured yet) we fall back to the built-in DEFAULT_EVENTS so the
 // site never ends up with zero events.
 export const listEvents = createServerFn({ method: "GET" }).handler(
-  async (): Promise<EventRow[]> => {
-    try {
-      const { data, error } = await db().from("events").select(EVENT_COLUMNS).order("sort_order");
-      if (error) throw error;
-      if (data && data.length > 0) {
-        return sortByDate(data.map((r) => normalizeEvent(r as Partial<EventRow>)));
-      }
-    } catch (err) {
-      console.warn("[listEvents] Supabase read failed, using defaults:", (err as Error).message);
-    }
-    return sortByDate(DEFAULT_EVENTS);
-  },
+  async (): Promise<EventRow[]> => readEvents(),
 );
 
 function assertAdminPassword(password: string) {
@@ -91,6 +97,14 @@ export const saveAdminEvents = createServerFn({ method: "POST" })
     if (toDelete.length > 0) {
       const { error } = await client.from("events").delete().in("slug", toDelete);
       if (error) throw new Error(`Failed to prune events: ${error.message}`);
+    }
+
+    // Mirror the nearest-upcoming events into the GHL cohort-slot custom values
+    // for email automations (slot 1 = nearest). Best-effort — never fail a save.
+    try {
+      await syncCohortSlots(data.events.map((e) => normalizeEvent(e)));
+    } catch (err) {
+      console.warn("[saveAdminEvents] cohort sync failed:", (err as Error).message);
     }
 
     return { ok: true as const, count: data.events.length };

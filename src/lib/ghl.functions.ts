@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { DEFAULT_EVENTS } from "./events";
+import { DEFAULT_EVENTS, getTodayISO, splitEvents, type EventRow } from "./events";
 
 const GHL_LOCATION_ID = "mVdYbXfJcF10Y7anuoNt";
 const GHL_BASE = "https://services.leadconnectorhq.com";
@@ -1933,3 +1933,113 @@ export const getEventAvailability = createServerFn({ method: "POST" })
       vip: tierAvailability("vip", counts),
     };
   });
+
+// ============== Cohort slots → GHL custom values ==============
+
+// The four location custom values that mirror the cohort cards (slot 1 = nearest
+// upcoming) so email automations can merge {{custom_values.cpsp_cohort_slot_N}}.
+const COHORT_SLOT_KEYS = [
+  "cpsp_cohort_slot_1",
+  "cpsp_cohort_slot_2",
+  "cpsp_cohort_slot_3",
+  "cpsp_cohort_slot_4",
+] as const;
+
+function normalizeKey(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/^\{\{|\}\}$/g, "")
+    .replace(/custom_values\./i, "")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+// Per-cohort "remaining tickets" custom values (by display name) — slot 1 =
+// nearest. {{custom_values.cp_s_p_remaining_ga_tickets_cohort_N}} etc.
+function cohortRemainingNames(n: number): { ga: string; vip: string } {
+  return {
+    ga: `CP-S&P: Remaining GA Tickets Cohort ${n}`,
+    vip: `CP-S&P: Remaining VIP Tickets Cohort ${n}`,
+  };
+}
+
+// Write the nearest-upcoming events (sorted, past dropped) into the GHL location
+// custom values — slot 1 = nearest:
+//   • cpsp_cohort_slot_1..4         → cohort info as JSON (for email merges)
+//   • CP-S&P: Remaining GA/VIP …    → remaining tickets per cohort (limit − sold)
+// Empty slots are cleared. Best-effort: matches existing custom values by key /
+// display name; any that don't exist in GHL are skipped (logged).
+export async function syncCohortSlots(events: EventRow[]): Promise<{ updated: number }> {
+  const top4 = splitEvents(events, getTodayISO()).upcoming.slice(0, 4);
+
+  let list: Array<{ id?: string; name?: string; fieldKey?: string }> = [];
+  try {
+    const res = (await ghlFetch(`/locations/${GHL_LOCATION_ID}/customValues`, {
+      method: "GET",
+    })) as { customValues?: Array<{ id?: string; name?: string; fieldKey?: string }> };
+    list = res.customValues ?? [];
+  } catch (err) {
+    console.warn("[syncCohortSlots] customValues fetch failed:", (err as Error).message);
+    return { updated: 0 };
+  }
+
+  // Update a custom value matched by normalized key OR display name.
+  const updateCv = async (match: string, value: string): Promise<boolean> => {
+    const target = normalizeKey(match);
+    const cv = list.find((v) => {
+      const fk = normalizeKey(String(v.fieldKey ?? ""));
+      const nm = normalizeKey(String(v.name ?? ""));
+      return fk === target || nm === target || fk.endsWith(target) || nm.endsWith(target);
+    });
+    if (!cv?.id) {
+      console.warn(`[syncCohortSlots] custom value "${match}" not found — skipped.`);
+      return false;
+    }
+    try {
+      await ghlFetch(`/locations/${GHL_LOCATION_ID}/customValues/${cv.id}`, {
+        method: "PUT",
+        body: JSON.stringify({ name: cv.name, value }),
+      });
+      return true;
+    } catch (err) {
+      console.warn(`[syncCohortSlots] update "${match}" failed:`, (err as Error).message);
+      return false;
+    }
+  };
+
+  let updated = 0;
+  for (let i = 0; i < 4; i++) {
+    const ev = top4[i];
+    const n = i + 1;
+    const names = cohortRemainingNames(n);
+
+    // Cohort info (JSON) for the slot.
+    const slotValue = ev
+      ? JSON.stringify({
+          city: ev.city,
+          date: ev.date,
+          venue: ev.venue,
+          address: ev.address,
+          end_date: ev.end_date,
+        })
+      : "";
+    if (await updateCv(COHORT_SLOT_KEYS[i], slotValue)) updated++;
+
+    // Remaining tickets per tier (limit − live sold count). Skip writing if the
+    // live count couldn't be read, so we never overwrite with a wrong number.
+    if (ev) {
+      const counts = await countEventSold(ev.slug, ev.end_date);
+      if (counts) {
+        const remGa = String(Math.max(TIER_LIMITS.ga - counts.ga, 0));
+        const remVip = String(Math.max(TIER_LIMITS.vip - counts.vip, 0));
+        if (await updateCv(names.ga, remGa)) updated++;
+        if (await updateCv(names.vip, remVip)) updated++;
+      }
+    } else {
+      // Empty slot — clear the remaining counters.
+      if (await updateCv(names.ga, "")) updated++;
+      if (await updateCv(names.vip, "")) updated++;
+    }
+  }
+  return { updated };
+}
