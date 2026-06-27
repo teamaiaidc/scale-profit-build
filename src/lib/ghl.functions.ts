@@ -1886,6 +1886,73 @@ async function countEventSold(
   return data;
 }
 
+// Count TICKETS SOLD per tier for an event (capacity basis): sum of each BUYER's
+// purchased quantity — GA can be multi-ticket, VIP is single-seat. Attendees are
+// NOT counted (they're already part of their buyer's quantity). This drives the
+// "remaining tickets" custom values (limit − sold), so unassigned multi-tickets
+// still reduce availability. Returns null if GHL couldn't be reached.
+async function countTicketsSold(
+  city: string,
+  endDate?: string,
+): Promise<{ ga: number; vip: number } | null> {
+  const slug = city.toLowerCase();
+  const searchTags = [eventTagSearchFragment(slug, endDate), `scale-profit-${slug}`];
+  const byId = new Map<string, RawSearchContact>();
+  let anySuccess = false;
+  const pageLimit = 100;
+  for (const tag of searchTags) {
+    try {
+      for (let page = 1; page <= 20; page++) {
+        const res = (await ghlFetch("/contacts/search", {
+          method: "POST",
+          body: JSON.stringify({
+            locationId: GHL_LOCATION_ID,
+            page,
+            pageLimit,
+            filters: [{ field: "tags", operator: "contains", value: tag }],
+          }),
+        })) as { contacts?: RawSearchContact[] };
+        anySuccess = true;
+        const batch = res.contacts ?? [];
+        for (const c of batch) {
+          const id = String(c.id ?? c.contactId ?? "");
+          if (id) byId.set(id, c);
+        }
+        if (batch.length < pageLimit) break;
+      }
+    } catch (err) {
+      console.warn(`GHL tickets-sold search failed for tag "${tag}":`, (err as Error).message);
+    }
+  }
+  if (!anySuccess) return null;
+
+  let vip = 0;
+  const gaBuyers: Array<{ id: string; email: string }> = [];
+  for (const c of byId.values()) {
+    const tags = (c.tags ?? []).map((t) => String(t));
+    if (deriveEventSlug(tags) !== slug) continue;
+    const isAttendee =
+      (c.source ?? "").toLowerCase().includes("attendee") || tags.includes("scale-profit-attendee");
+    if (isAttendee) continue; // already part of a buyer's quantity
+    const tier = deriveTier(tags, c.opportunities);
+    if (tier === "VIP") vip += 1;
+    else if (tier === "General Admission") {
+      gaBuyers.push({ id: String(c.id ?? c.contactId ?? ""), email: c.email ?? "" });
+    }
+  }
+  // Accurate GA ticket quantities per buyer (matches the dashboard's count).
+  const gaQtys = await mapWithConcurrency(gaBuyers, 6, async (b) => {
+    if (!b.id) return 1;
+    const { ticketQuantity } = await resolveBuyerCounts(b.id, b.email).catch(() => ({
+      ticketQuantity: 1,
+      attendeesAdded: 0,
+    }));
+    return Math.max(ticketQuantity, 1);
+  });
+  const ga = gaQtys.reduce((sum, n) => sum + n, 0);
+  return { ga, vip };
+}
+
 export type TierAvailability = {
   limit: number;
   sold: number;
@@ -2025,10 +2092,11 @@ export async function syncCohortSlots(events: EventRow[]): Promise<{ updated: nu
       : "";
     if (await updateCv(COHORT_SLOT_KEYS[i], slotValue)) updated++;
 
-    // Remaining tickets per tier (limit − live sold count). Skip writing if the
-    // live count couldn't be read, so we never overwrite with a wrong number.
+    // Remaining tickets per tier = limit − tickets SOLD (sum of purchased
+    // quantities, so unassigned multi-tickets still count). Skip writing if the
+    // count couldn't be read, so we never overwrite with a wrong number.
     if (ev) {
-      const counts = await countEventSold(ev.slug, ev.end_date);
+      const counts = await countTicketsSold(ev.slug, ev.end_date);
       if (counts) {
         const remGa = String(Math.max(TIER_LIMITS.ga - counts.ga, 0));
         const remVip = String(Math.max(TIER_LIMITS.vip - counts.vip, 0));
