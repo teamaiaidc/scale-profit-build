@@ -23,6 +23,8 @@ confirm it exists in GHL or the value/merge-tag will be empty.
 | `cpsp_name_of_attendees` 🆕                          | Multi-line text | JSON list of registered attendees (revoke)      |
 | `cpsp_buyer_attending` 🆕                            | Text            | "yes"/"no" — does the buyer use 1 ticket        |
 | `cpsp_role` 🆕                                       | Text            | "Buyer" / "Attendee" (does the contact attend)  |
+| `cpsp_buyer_name` 🆕                                 | Text            | On an attendee: who bought their ticket (name)  |
+| `cpsp_buyer_email` 🆕                                | Text            | On an attendee: buyer's email                   |
 
 > Agency **State**, **Phone**, **Email**, **Name** use GHL's native fields — nothing to create.
 

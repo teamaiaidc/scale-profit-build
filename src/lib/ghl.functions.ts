@@ -75,6 +75,11 @@ const FIELD_KEYS = {
   // means they bought all tickets for others. Absent → treated as attending.
   // GHL contact field (text) → {{contact.cpsp_buyer_attending}}.
   buyerAttending: "cpsp_buyer_attending",
+  // For an attendee: the buyer who bought their ticket. Stored on the attendee
+  // CONTACT (always written, unlike the opportunity) so the card shows it
+  // reliably. → {{contact.cpsp_buyer_name}} / {{contact.cpsp_buyer_email}}.
+  buyerName: "cpsp_buyer_name",
+  buyerEmail: "cpsp_buyer_email",
 } as const;
 
 // GHL *opportunity* custom-field keys (separate object/namespace from contact
@@ -967,6 +972,12 @@ export const addAttendeesToGhl = createServerFn({ method: "POST" })
             source: "Scale & Profit Seminar Attendee",
             customFields: [
               { key: FIELD_KEYS.role, field_value: "Attendee" },
+              ...(data.buyerName
+                ? [{ key: FIELD_KEYS.buyerName, field_value: data.buyerName }]
+                : []),
+              ...(data.buyerEmail
+                ? [{ key: FIELD_KEYS.buyerEmail, field_value: data.buyerEmail }]
+                : []),
               ...(a.hasMoa ? [{ key: FIELD_KEYS.hasMoa, field_value: a.hasMoa }] : []),
               ...(a.attendedBefore
                 ? [{ key: FIELD_KEYS.attendedBefore, field_value: a.attendedBefore }]
@@ -1685,15 +1696,22 @@ export const getPurchaserDetail = createServerFn({ method: "POST" })
     // purchaser recorded on this contact's opportunity (for attendees).
     // Default = NOT attending (role "Buyer") until the admin marks them attending.
     const buyerAttending = valueOf(FIELD_KEYS.buyerAttending).toLowerCase() === "yes";
-    const buyer = await fetchOpportunityBuyer(data.contactId);
+    // Prefer the buyer name/email stored on the attendee's contact (reliable);
+    // fall back to the opportunity for attendees registered before that.
+    const contactBuyerName = valueOf(FIELD_KEYS.buyerName);
+    const contactBuyerEmail = valueOf(FIELD_KEYS.buyerEmail);
+    const oppBuyer =
+      contactBuyerName && contactBuyerEmail
+        ? { name: contactBuyerName, email: contactBuyerEmail }
+        : await fetchOpportunityBuyer(data.contactId);
 
     return {
       ticketQuantity: Number.isFinite(contactQty) && contactQty > 0 ? contactQty : oppTickets,
       attendeesAdded,
       attendees: attendeeList,
       buyerAttending,
-      buyerName: buyer.name,
-      buyerEmail: buyer.email,
+      buyerName: contactBuyerName || oppBuyer.name,
+      buyerEmail: contactBuyerEmail || oppBuyer.email,
       answers: {
         // Agency state lives in the native contact State field.
         agencyState: c.state ?? "",
