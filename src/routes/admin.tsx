@@ -1114,11 +1114,14 @@ function PurchaserDialog({
     }
   };
 
-  // Auto-size attendee rows to match how many more guests still need to be added.
+  // Auto-size attendee rows to match how many more guests still need to be added
+  // — grows AND shrinks (e.g. when "Buyer is attending" is ticked, dropping the
+  // count by 1, the extra row is removed so it doesn't confuse the admin).
   useEffect(() => {
     if (!p || p.isAttendee || remaining <= 0) return;
     setExtraAttendees((prev) => {
-      if (prev.length >= remaining) return prev;
+      if (prev.length === remaining) return prev;
+      if (prev.length > remaining) return prev.slice(0, remaining);
       const next = [...prev];
       while (next.length < remaining) next.push({ ...emptyAttendee });
       return next;
