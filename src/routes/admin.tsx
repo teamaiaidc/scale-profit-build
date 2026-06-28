@@ -1201,21 +1201,21 @@ function PurchaserDialog({
     }
   };
 
-  const handleRevoke = async (attendeeId: string) => {
-    if (!p?.id) return;
+  const handleRevoke = async (attendeeEmail: string) => {
+    if (!p?.id || !attendeeEmail) return;
     setRevokeError(null);
-    setRevokingId(attendeeId);
+    setRevokingId(attendeeEmail);
     try {
       const res = await revokeAttendeeFn({
         data: {
           password,
           buyerContactId: p.id,
-          attendeeId,
+          attendeeEmail,
           city: p.eventSlug || "boston",
           tier: p.tier === "VIP" ? "vip" : "ga",
         },
       });
-      setAttendees((prev) => prev.filter((a) => a.id !== attendeeId));
+      setAttendees((prev) => prev.filter((a) => a.email !== attendeeEmail));
       setAddedCount(res.attendeesAdded);
       setSavedMsg(null);
     } catch (err) {
@@ -1298,7 +1298,7 @@ function PurchaserDialog({
                   <div className="space-y-2">
                     {attendees.map((a) => (
                       <div
-                        key={a.id}
+                        key={a.email}
                         className="flex items-center justify-between gap-2 rounded-md border border-border/60 p-2.5"
                       >
                         <div className="min-w-0">
@@ -1313,11 +1313,11 @@ function PurchaserDialog({
                         </div>
                         <button
                           type="button"
-                          onClick={() => handleRevoke(a.id)}
-                          disabled={revokingId === a.id}
+                          onClick={() => handleRevoke(a.email)}
+                          disabled={revokingId === a.email}
                           className="shrink-0 text-xs font-medium text-destructive hover:underline disabled:opacity-50"
                         >
-                          {revokingId === a.id ? "Revoking…" : "Revoke"}
+                          {revokingId === a.email ? "Revoking…" : "Revoke"}
                         </button>
                       </div>
                     ))}

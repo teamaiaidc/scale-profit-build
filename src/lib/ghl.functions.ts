@@ -842,33 +842,58 @@ export const listGhlProducts = createServerFn({ method: "GET" }).handler(
 
 // ============== Post-purchase attendees ==============
 
-// One registered attendee belonging to a buyer. Persisted as a JSON list in the
-// buyer's cpsp_name_of_attendees field so the admin can list + revoke them.
+// One registered attendee belonging to a buyer. Stored in the buyer's
+// cpsp_name_of_attendees field — human-readable lines "First Last <email>" so the
+// admin can read them in GHL. (id is only known when freshly added.)
 export type AttendeeRecord = {
-  id: string;
+  id?: string;
   firstName: string;
   lastName: string;
   email: string;
 };
 
-// Parse the buyer's cpsp_name_of_attendees JSON, tolerating empty/garbage values.
+// Render the attendee list as readable lines: "First Last <email>" — one per line.
+function formatAttendeeList(list: AttendeeRecord[]): string {
+  return list
+    .map((a) => `${[a.firstName, a.lastName].filter(Boolean).join(" ").trim()} <${a.email}>`.trim())
+    .join("\n");
+}
+
+// Parse the buyer's cpsp_name_of_attendees field. Handles the readable
+// "First Last <email>" lines AND the legacy JSON array, tolerating garbage.
 function parseAttendeeList(raw: string): AttendeeRecord[] {
-  if (!raw.trim()) return [];
-  try {
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .filter((a) => a && typeof a === "object")
-      .map((a: Record<string, unknown>) => ({
-        id: String(a.id ?? ""),
-        firstName: String(a.firstName ?? ""),
-        lastName: String(a.lastName ?? ""),
-        email: String(a.email ?? ""),
-      }))
-      .filter((a) => a.id);
-  } catch {
-    return [];
+  const trimmed = raw.trim();
+  if (!trimmed) return [];
+  // Legacy JSON array.
+  if (trimmed.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        return parsed
+          .filter((a) => a && typeof a === "object")
+          .map((a: Record<string, unknown>) => ({
+            id: a.id ? String(a.id) : undefined,
+            firstName: String(a.firstName ?? ""),
+            lastName: String(a.lastName ?? ""),
+            email: String(a.email ?? ""),
+          }))
+          .filter((a) => a.email);
+      }
+    } catch {
+      /* fall through to line parsing */
+    }
   }
+  // Readable lines: "First Last <email>".
+  return trimmed
+    .split(/\r?\n/)
+    .map((line) => {
+      const m = line.match(/^(.*?)<([^>]+)>\s*$/);
+      const name = (m ? m[1] : line).trim();
+      const email = (m ? m[2] : "").trim();
+      const [firstName = "", ...rest] = name.split(/\s+/);
+      return { firstName, lastName: rest.join(" "), email };
+    })
+    .filter((a) => a.email);
 }
 
 // Read a buyer's persisted attendee list + running count from their contact.
@@ -1018,7 +1043,7 @@ export const addAttendeesToGhl = createServerFn({ method: "POST" })
         const list = [...existing.list, ...savedAttendees];
         const customFields = await contactFieldEntries([
           { key: FIELD_KEYS.attendeesAdded, value: String(existing.count + saved) },
-          { key: FIELD_KEYS.attendeesList, value: JSON.stringify(list) },
+          { key: FIELD_KEYS.attendeesList, value: formatAttendeeList(list) },
         ]);
         await ghlFetch(`/contacts/${data.buyerContactId}`, {
           method: "PUT",
@@ -1100,40 +1125,58 @@ export const addAttendeesToGhl = createServerFn({ method: "POST" })
 const revokeAttendeeSchema = z.object({
   password: z.string().min(1).max(200),
   buyerContactId: z.string().min(1).max(100),
-  attendeeId: z.string().min(1).max(100),
+  attendeeEmail: z.string().email().max(200),
   city: z.string().min(1).max(50),
   // ISO end date (YYYY-MM-DD); falls back to the slug's default if omitted.
   endDate: z.string().max(20).optional(),
   tier: z.enum(["ga", "vip"]).optional(),
 });
 
-// Revoke a previously-registered attendee from a buyer: removes the event tag
-// from the attendee (so they no longer count as a seat — the contact itself is
-// kept) and drops them from the buyer's attendee list + decrements the count,
-// freeing the slot to reassign. Admin-gated.
+// Look up a contact id by email (exact match). Returns "" if not found.
+async function findContactIdByEmail(email: string): Promise<string> {
+  try {
+    const res = (await ghlFetch(
+      `/contacts/?locationId=${GHL_LOCATION_ID}&query=${encodeURIComponent(email)}`,
+      { method: "GET" },
+    )) as { contacts?: Array<{ id?: string; email?: string }> };
+    const hit = res.contacts?.find((c) => c.email?.toLowerCase() === email.toLowerCase());
+    return hit?.id ?? "";
+  } catch (err) {
+    console.warn("GHL contact lookup by email failed:", (err as Error).message);
+    return "";
+  }
+}
+
+// Revoke a previously-registered attendee (by email) from a buyer: removes the
+// event tag from the attendee (so they no longer count as a seat — the contact
+// itself is kept) and drops them from the buyer's attendee list + decrements the
+// count, freeing the slot to reassign. Admin-gated.
 export const revokeAttendeeFromBuyer = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => revokeAttendeeSchema.parse(d))
   .handler(async ({ data }) => {
     assertAdmin(data.password);
     // 1. Remove the event tag AND the attendee tag from the attendee (keep the
     // contact) so they no longer count as a seat / registered attendee.
-    const tag = eventTag(data.tier ?? "ga", data.city, data.endDate);
-    try {
-      await ghlFetch(`/contacts/${data.attendeeId}/tags`, {
-        method: "DELETE",
-        body: JSON.stringify({ tags: [tag, ATTENDEE_TAG] }),
-      });
-    } catch (err) {
-      console.warn("GHL attendee untag failed:", (err as Error).message);
+    const attendeeId = await findContactIdByEmail(data.attendeeEmail);
+    if (attendeeId) {
+      const tag = eventTag(data.tier ?? "ga", data.city, data.endDate);
+      try {
+        await ghlFetch(`/contacts/${attendeeId}/tags`, {
+          method: "DELETE",
+          body: JSON.stringify({ tags: [tag, ATTENDEE_TAG] }),
+        });
+      } catch (err) {
+        console.warn("GHL attendee untag failed:", (err as Error).message);
+      }
     }
     // 2. Drop the attendee from the buyer's list + decrement the count.
     const { list, count } = await readBuyerAttendeeList(data.buyerContactId);
-    const nextList = list.filter((a) => a.id !== data.attendeeId);
+    const nextList = list.filter((a) => a.email.toLowerCase() !== data.attendeeEmail.toLowerCase());
     const removed = nextList.length < list.length;
     const nextCount = Math.max(count - (removed ? 1 : 0), 0);
     const customFields = await contactFieldEntries([
       { key: FIELD_KEYS.attendeesAdded, value: String(nextCount) },
-      { key: FIELD_KEYS.attendeesList, value: JSON.stringify(nextList) },
+      { key: FIELD_KEYS.attendeesList, value: formatAttendeeList(nextList) },
     ]);
     await ghlFetch(`/contacts/${data.buyerContactId}`, {
       method: "PUT",
