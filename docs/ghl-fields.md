@@ -7,24 +7,24 @@ confirm it exists in GHL or the value/merge-tag will be empty.
 
 ## Contact custom fields
 
-| Field key                                            | Type            | Purpose                                         |
-| ---------------------------------------------------- | --------------- | ----------------------------------------------- |
-| `event_city`                                         | Text            | Buyer's event slug                              |
-| `ticket_tier`                                        | Text            | "VIP" / "General Admission"                     |
-| `order_amount`                                       | Number/Text     | Order amount                                    |
-| `sp_no_of_ticket_purchased`                          | Number          | Tickets purchased (primary)                     |
-| `sp2026_ticket_quantity`                             | Number          | Tickets (legacy, also written)                  |
-| `ticket_quantity`                                    | Number          | Tickets (legacy, read-only fallback)            |
-| `sp2026ticket_quantity`                              | Number          | Tickets (legacy, read-only fallback)            |
-| `do_you_have_a_moa_1`                                | Text            | Survey: MOA                                     |
-| `have_you_attended_a_scale__profit_seminar_before_1` | Text            | Survey: attended before                         |
-| `scale__profit_shirt_size`                           | Text            | Survey: shirt size                              |
-| `cpsp_no_of_attendees_added` 🆕                      | Number          | # attendees registered (unassigned-ticket math) |
-| `cpsp_name_of_attendees` 🆕                          | Multi-line text | JSON list of registered attendees (revoke)      |
-| `cpsp_buyer_attending` 🆕                            | Text            | "yes"/"no" — does the buyer use 1 ticket        |
-| `cpsp_role` 🆕                                       | Text            | "Buyer" / "Attendee" (does the contact attend)  |
-| `cpsp_buyer_name` 🆕                                 | Text            | On an attendee: who bought their ticket (name)  |
-| `cpsp_buyer_email` 🆕                                | Text            | On an attendee: buyer's email                   |
+| Field key                                            | Type            | Purpose                                                       |
+| ---------------------------------------------------- | --------------- | ------------------------------------------------------------- |
+| `event_city`                                         | Text            | Buyer's event slug                                            |
+| `ticket_tier`                                        | Text            | "VIP" / "General Admission"                                   |
+| `order_amount`                                       | Number/Text     | Order amount                                                  |
+| `sp_no_of_ticket_purchased`                          | Number          | Tickets purchased (primary)                                   |
+| `sp2026_ticket_quantity`                             | Number          | Tickets (legacy, also written)                                |
+| `ticket_quantity`                                    | Number          | Tickets (legacy, read-only fallback)                          |
+| `sp2026ticket_quantity`                              | Number          | Tickets (legacy, read-only fallback)                          |
+| `do_you_have_a_moa_1`                                | Text            | Survey: MOA                                                   |
+| `have_you_attended_a_scale__profit_seminar_before_1` | Text            | Survey: attended before                                       |
+| `scale__profit_shirt_size`                           | Text            | Survey: shirt size                                            |
+| `cpsp_no_of_attendees_added` 🆕                      | Number          | # attendees registered (unassigned-ticket math)               |
+| `cpsp_name_of_attendees` 🆕                          | Multi-line text | Readable attendee list "First Last <email>" per line (revoke) |
+| `cpsp_buyer_attending` 🆕                            | Text            | "yes"/"no" — does the buyer use 1 ticket                      |
+| `cpsp_role` 🆕                                       | Text            | "Buyer" / "Attendee" (does the contact attend)                |
+| `cpsp_buyer_name` 🆕                                 | Text            | On an attendee: who bought their ticket (name)                |
+| `cpsp_buyer_email` 🆕                                | Text            | On an attendee: buyer's email                                 |
 
 > Agency **State**, **Phone**, **Email**, **Name** use GHL's native fields — nothing to create.
 
@@ -39,8 +39,6 @@ confirm it exists in GHL or the value/merge-tag will be empty.
 | `sp_cohort_venue`           | Text   | Cohort venue                |
 | `sp_cohort_address`         | Text   | Cohort address              |
 | `sp_cohort_time`            | Text   | Cohort time                 |
-| `cpsp_buyer_name` 🆕        | Text   | Attendee's buyer name       |
-| `cpsp_buyer_email` 🆕       | Text   | Attendee's buyer email      |
 | `cpsp_ticket_tier` 🆕       | Text   | "General Admission" / "VIP" |
 
 ## Location custom values

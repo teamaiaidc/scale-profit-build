@@ -75,8 +75,8 @@ const FIELD_KEYS = {
   // means they bought all tickets for others. Absent → treated as attending.
   // GHL contact field (text) → {{contact.cpsp_buyer_attending}}.
   buyerAttending: "cpsp_buyer_attending",
-  // For an attendee: the buyer who bought their ticket. Stored on the attendee
-  // CONTACT (always written, unlike the opportunity) so the card shows it
+  // For an attendee: the buyer who bought their ticket. CONTACT fields (written
+  // on every attendee, no opportunity needed) so the card + emails show it
   // reliably. → {{contact.cpsp_buyer_name}} / {{contact.cpsp_buyer_email}}.
   buyerName: "cpsp_buyer_name",
   buyerEmail: "cpsp_buyer_email",
@@ -93,10 +93,6 @@ const OPP_FIELD_KEYS = {
   cohortVenue: "sp_cohort_venue",
   cohortAddress: "sp_cohort_address",
   cohortTime: "sp_cohort_time",
-  // The buyer who purchased this attendee's ticket, set when the admin registers
-  // an additional attendee → {{opportunity.cpsp_buyer_name}} / cpsp_buyer_email.
-  buyerName: "cpsp_buyer_name",
-  buyerEmail: "cpsp_buyer_email",
   // Tier purchased → {{opportunity.cpsp_ticket_tier}} ("General Admission" / "VIP").
   ticketTier: "cpsp_ticket_tier",
 } as const;
@@ -1098,10 +1094,6 @@ export const addAttendeesToGhl = createServerFn({ method: "POST" })
                   status: "open",
                   contactId: a.id,
                   customFields: [
-                    { key: OPP_FIELD_KEYS.buyerName, field_value: data.buyerName ?? "" },
-                    ...(data.buyerEmail
-                      ? [{ key: OPP_FIELD_KEYS.buyerEmail, field_value: data.buyerEmail }]
-                      : []),
                     {
                       key: OPP_FIELD_KEYS.ticketTier,
                       field_value: data.tier === "vip" ? "VIP" : "General Admission",
@@ -1426,46 +1418,6 @@ async function fetchOpportunityTicketCount(contactId: string, email = ""): Promi
   }
 }
 
-// Reads the buyer (ticket purchaser) name + email from a contact's opportunity
-// ({{opportunity.cpsp_buyer_name}} / cpsp_buyer_email) — for attendees, who
-// bought their ticket. Returns "" for any field not set.
-async function fetchOpportunityBuyer(contactId: string): Promise<{ name: string; email: string }> {
-  try {
-    const oppMeta = await getFieldMeta("opportunity");
-    let nameId = "";
-    let emailId = "";
-    for (const [id, m] of oppMeta) {
-      if (m.key === OPP_FIELD_KEYS.buyerName) nameId = id;
-      else if (m.key === OPP_FIELD_KEYS.buyerEmail) emailId = id;
-    }
-    const res = (await ghlFetch(
-      `/opportunities/search?location_id=${GHL_LOCATION_ID}&contact_id=${contactId}`,
-      { method: "GET" },
-    )) as {
-      opportunities?: Array<{
-        customFields?: Array<{
-          id?: string;
-          value?: unknown;
-          fieldValueString?: unknown;
-          field_value?: unknown;
-        }>;
-      }>;
-    };
-    let name = "";
-    let email = "";
-    for (const o of res.opportunities ?? []) {
-      for (const f of o.customFields ?? []) {
-        if (nameId && f.id === nameId && !name) name = String(readCustomFieldValue(f) ?? "");
-        if (emailId && f.id === emailId && !email) email = String(readCustomFieldValue(f) ?? "");
-      }
-    }
-    return { name, email };
-  } catch (err) {
-    console.warn("GHL buyer field read failed:", (err as Error).message);
-    return { name: "", email: "" };
-  }
-}
-
 // Single source of truth for a buyer's counts — tickets purchased AND how many
 // additional attendees have already been registered — used by BOTH the Attendees
 // table and the detail dialog so their numbers always match. The contacts/search
@@ -1739,22 +1691,16 @@ export const getPurchaserDetail = createServerFn({ method: "POST" })
     // purchaser recorded on this contact's opportunity (for attendees).
     // Default = NOT attending (role "Buyer") until the admin marks them attending.
     const buyerAttending = valueOf(FIELD_KEYS.buyerAttending).toLowerCase() === "yes";
-    // Prefer the buyer name/email stored on the attendee's contact (reliable);
-    // fall back to the opportunity for attendees registered before that.
-    const contactBuyerName = valueOf(FIELD_KEYS.buyerName);
-    const contactBuyerEmail = valueOf(FIELD_KEYS.buyerEmail);
-    const oppBuyer =
-      contactBuyerName && contactBuyerEmail
-        ? { name: contactBuyerName, email: contactBuyerEmail }
-        : await fetchOpportunityBuyer(data.contactId);
 
     return {
       ticketQuantity: Number.isFinite(contactQty) && contactQty > 0 ? contactQty : oppTickets,
       attendeesAdded,
       attendees: attendeeList,
       buyerAttending,
-      buyerName: contactBuyerName || oppBuyer.name,
-      buyerEmail: contactBuyerEmail || oppBuyer.email,
+      // For attendees: the buyer who bought their ticket, from the contact
+      // ({{contact.cpsp_buyer_name}} / cpsp_buyer_email).
+      buyerName: valueOf(FIELD_KEYS.buyerName),
+      buyerEmail: valueOf(FIELD_KEYS.buyerEmail),
       answers: {
         // Agency state lives in the native contact State field.
         agencyState: c.state ?? "",
