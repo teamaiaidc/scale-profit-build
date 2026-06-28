@@ -51,8 +51,8 @@ const FIELD_KEYS = {
   eventCity: "event_city",
   ticketTier: "ticket_tier",
   orderAmount: "order_amount",
-  // "Attendee" if the contact attends (single ticket, multi-ticket buyer who is
-  // attending, or a registered attendee); else "Buyer". → {{contact.cpsp_role}}.
+  // "Buyer" on purchase; becomes "Attendee" for registered attendees or a
+  // multi-ticket buyer marked attending. → {{contact.cpsp_role}}.
   role: "cpsp_role",
   // Real per-buyer ticket count, set by the GHL workflow (see docs §6).
   ticketQuantity: "sp_no_of_ticket_purchased",
@@ -214,9 +214,9 @@ export const submitCheckoutToGhl = createServerFn({ method: "POST" })
           { key: FIELD_KEYS.ticketTier, field_value: tierLabel },
           ...ticketQuantityFields,
           { key: FIELD_KEYS.orderAmount, field_value: String(data.amount) },
-          // Single-ticket buyers attend their own ticket → Attendee. Multi-ticket
-          // buyers default to Buyer until the admin marks them attending.
-          { key: FIELD_KEYS.role, field_value: data.quantity === 1 ? "Attendee" : "Buyer" },
+          // On purchase completion the contact is a Buyer. The role becomes
+          // "Attendee" later — registered attendees, or a buyer marked attending.
+          { key: FIELD_KEYS.role, field_value: "Buyer" },
           ...(data.survey
             ? [
                 { key: FIELD_KEYS.hasMoa, field_value: data.survey.hasMoa },
@@ -1183,8 +1183,8 @@ export const addManualBuyer = createServerFn({ method: "POST" })
           { key: FIELD_KEYS.ticketTier, field_value: tierLabel },
           { key: FIELD_KEYS.ticketQuantity, field_value: String(quantity) },
           { key: FIELD_KEYS.ticketQuantityLegacy, field_value: String(quantity) },
-          // Single-ticket buyer attends; multi-ticket defaults to Buyer.
-          { key: FIELD_KEYS.role, field_value: quantity === 1 ? "Attendee" : "Buyer" },
+          // On purchase the contact is a Buyer (role refined to Attendee later).
+          { key: FIELD_KEYS.role, field_value: "Buyer" },
         ],
       }),
     })) as { contact?: { id?: string }; id?: string };
