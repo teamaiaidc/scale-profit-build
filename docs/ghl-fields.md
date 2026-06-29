@@ -57,6 +57,7 @@ confirm it exists in GHL or the value/merge-tag will be empty.
 | `🤝 s&p-multipleticket-buyer`                                       | Buyer who registered additional attendees                    |
 | `🤝 s&p-attendee`                                                   | A registered additional attendee                             |
 | `🤝 s&p-manual-attendee`                                            | An attendee the admin registered by hand (automation target) |
+| `🤝 s&p-revoked`                                                    | Attendee whose ticket the admin revoked (event tags removed) |
 
 ## Attendee-registered webhook (pipeline automation)
 

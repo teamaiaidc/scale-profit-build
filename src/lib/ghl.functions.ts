@@ -22,6 +22,9 @@ const ATTENDEE_TAG = "🤝 s&p-attendee";
 // Marks an attendee that the admin registered by hand (vs. any future
 // self-registered attendee), so automations can target admin-added ones.
 const MANUAL_ATTENDEE_TAG = "🤝 s&p-manual-attendee";
+// Applied when the admin revokes an attendee's ticket — a visible marker + an
+// automation hook (the event/attendee tags are removed at the same time).
+const REVOKED_TAG = "🤝 s&p-revoked";
 
 // "2026-06-03" → "260603"; "" if the date isn't a full ISO date.
 function yymmdd(isoDate?: string): string {
@@ -1192,15 +1195,16 @@ async function findContactIdByEmail(email: string): Promise<string> {
 }
 
 // Revoke a previously-registered attendee (by email) from a buyer: removes the
-// event tag from the attendee (so they no longer count as a seat — the contact
-// itself is kept) and drops them from the buyer's attendee list + decrements the
-// count, freeing the slot to reassign. Admin-gated.
+// event/attendee tags (so they no longer count as a seat — the contact itself is
+// kept), marks the contact 🤝 s&p-revoked, clears its stale attendee fields, and
+// drops them from the buyer's attendee list + decrements the count, freeing the
+// slot to reassign. Admin-gated.
 export const revokeAttendeeFromBuyer = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => revokeAttendeeSchema.parse(d))
   .handler(async ({ data }) => {
     assertAdmin(data.password);
-    // 1. Remove the event tag AND the attendee tag from the attendee (keep the
-    // contact) so they no longer count as a seat / registered attendee.
+    // 1. Remove the event + attendee tags (keep the contact) so they no longer
+    // count as a seat, add the revoked marker, and clear stale attendee fields.
     const attendeeId = await findContactIdByEmail(data.attendeeEmail);
     if (attendeeId) {
       const tag = eventTag(data.tier ?? "ga", data.city, data.endDate);
@@ -1211,6 +1215,29 @@ export const revokeAttendeeFromBuyer = createServerFn({ method: "POST" })
         });
       } catch (err) {
         console.warn("GHL attendee untag failed:", (err as Error).message);
+      }
+      // Add the revoked marker tag (visible indicator + automation hook).
+      try {
+        await ghlFetch(`/contacts/${attendeeId}/tags`, {
+          method: "POST",
+          body: JSON.stringify({ tags: [REVOKED_TAG] }),
+        });
+      } catch (err) {
+        console.warn("GHL revoked tag failed:", (err as Error).message);
+      }
+      // Clear the now-stale attendee fields so nothing lingers on the contact.
+      try {
+        const cleared = await contactFieldEntries([
+          { key: FIELD_KEYS.role, value: "" },
+          { key: FIELD_KEYS.buyerName, value: "" },
+          { key: FIELD_KEYS.buyerEmail, value: "" },
+        ]);
+        await ghlFetch(`/contacts/${attendeeId}`, {
+          method: "PUT",
+          body: JSON.stringify({ customFields: cleared }),
+        });
+      } catch (err) {
+        console.warn("GHL attendee field clear failed:", (err as Error).message);
       }
     }
     // 2. Drop the attendee from the buyer's list + decrement the count.
