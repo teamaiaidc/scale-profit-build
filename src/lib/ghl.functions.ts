@@ -963,18 +963,37 @@ const addAttendeesSchema = z.object({
   // The buyer these attendees belong to — so we can persist a running
   // "attendees added" count on the buyer for the admin's remaining counter.
   buyerContactId: z.string().max(100).optional(),
-  // The buyer's name + email, recorded on each attendee's opportunity
-  // ({{opportunity.cpsp_buyer_name}} / cpsp_buyer_email).
+  // The buyer's name + email, recorded on each attendee's contact
+  // ({{contact.cpsp_buyer_name}} / cpsp_buyer_email).
   buyerName: z.string().max(200).optional(),
   buyerEmail: z.string().max(200).optional(),
 });
+
+// Optional outbound webhook fired once per attendee when the admin registers
+// them, so a GHL "Inbound Webhook" workflow can pick them up (e.g. assign them to
+// a pipeline). No-op unless GHL_ATTENDEE_WEBHOOK_URL is set. Best-effort — a
+// failure here never blocks the registration.
+async function fireAttendeeWebhook(payload: Record<string, unknown>): Promise<void> {
+  const url = (process.env.GHL_ATTENDEE_WEBHOOK_URL ?? "").trim();
+  if (!url) return;
+  try {
+    await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  } catch (err) {
+    console.warn("Attendee webhook POST failed:", (err as Error).message);
+  }
+}
 
 export const addAttendeesToGhl = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => addAttendeesSchema.parse(d))
   .handler(async ({ data }) => {
     // The event tag (🤝 s&p-{tier}-{city}-{yymmdd}) — same as the buyer — plus the
     // attendee tag marking them as someone else's extra ticket holder.
-    const tags = [eventTag(data.tier, data.city, data.endDate), ATTENDEE_TAG];
+    const evTag = eventTag(data.tier, data.city, data.endDate);
+    const tags = [evTag, ATTENDEE_TAG];
     const toAdd = data.attendees.filter((a) => a.email);
     const results = await Promise.allSettled(
       toAdd.map((a) =>
@@ -1012,18 +1031,21 @@ export const addAttendeesToGhl = createServerFn({ method: "POST" })
     // Capture each saved attendee WITH its GHL contact id, so the buyer can track
     // exactly who was registered and the admin can revoke a specific one later.
     const savedAttendees: AttendeeRecord[] = [];
+    const savedInputs: Array<{ id: string; a: (typeof toAdd)[number] }> = [];
     results.forEach((r, i) => {
       if (r.status !== "fulfilled") return;
       const body = r.value as { contact?: { id?: string }; id?: string };
       const id = body.contact?.id ?? body.id ?? "";
       const a = toAdd[i];
-      if (id)
+      if (id) {
         savedAttendees.push({
           id,
           firstName: a.firstName,
           lastName: a.lastName,
           email: a.email,
         });
+        savedInputs.push({ id, a });
+      }
     });
     const saved = savedAttendees.length;
     const failed = results.length - saved;
@@ -1109,6 +1131,32 @@ export const addAttendeesToGhl = createServerFn({ method: "POST" })
       } catch (err) {
         console.warn("GHL attendee opportunity create failed:", (err as Error).message);
       }
+    }
+
+    // Fire the outbound webhook (one POST per attendee) so a GHL Inbound Webhook
+    // workflow can assign them to a pipeline. Best-effort, never blocks the result.
+    if (savedInputs.length) {
+      await Promise.allSettled(
+        savedInputs.map(({ id, a }) =>
+          fireAttendeeWebhook({
+            event: "attendee_registered",
+            contactId: id,
+            firstName: a.firstName,
+            lastName: a.lastName,
+            fullName: `${a.firstName} ${a.lastName}`.trim(),
+            email: a.email,
+            phone: a.phone,
+            state: a.agencyState ?? "",
+            eventSlug: data.city,
+            tier: data.tier === "vip" ? "VIP" : "General Admission",
+            eventTag: evTag,
+            role: "Attendee",
+            buyerName: data.buyerName ?? "",
+            buyerEmail: data.buyerEmail ?? "",
+            buyerContactId: data.buyerContactId ?? "",
+          }),
+        ),
+      );
     }
 
     return { ok: failed === 0, saved, failed, attendees: savedAttendees };
@@ -1272,8 +1320,8 @@ export type PurchaserDetail = {
   attendeesAdded: number; // additional attendees already registered for this buyer
   attendees: AttendeeRecord[]; // the registered attendees (revocable individually)
   buyerAttending: boolean; // whether the buyer uses 1 of their tickets (default true)
-  buyerName: string; // for attendees: who bought their ticket (opportunity field)
-  buyerEmail: string; // for attendees: the buyer's email (opportunity field)
+  buyerName: string; // for attendees: who bought their ticket (contact field)
+  buyerEmail: string; // for attendees: the buyer's email (contact field)
   answers: {
     agencyState: string;
     hasMoa: string;
