@@ -51,11 +51,12 @@ confirm it exists in GHL or the value/merge-tag will be empty.
 
 ## Tags (applied automatically)
 
-| Tag                                                                 | Applied to                                              |
-| ------------------------------------------------------------------- | ------------------------------------------------------- |
-| `🤝 s&p-{tier}-{city}-{yymmdd}` (e.g. `🤝 s&p-ga-nashville-260806`) | Every buyer + attendee (identifies tier + event + date) |
-| `🤝 s&p-multipleticket-buyer`                                       | Buyer who registered additional attendees               |
-| `🤝 s&p-attendee`                                                   | A registered additional attendee                        |
+| Tag                                                                 | Applied to                                                   |
+| ------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `🤝 s&p-{tier}-{city}-{yymmdd}` (e.g. `🤝 s&p-ga-nashville-260806`) | Every buyer + attendee (identifies tier + event + date)      |
+| `🤝 s&p-multipleticket-buyer`                                       | Buyer who registered additional attendees                    |
+| `🤝 s&p-attendee`                                                   | A registered additional attendee                             |
+| `🤝 s&p-manual-attendee`                                            | An attendee the admin registered by hand (automation target) |
 
 ## Attendee-registered webhook (pipeline automation)
 
@@ -65,8 +66,8 @@ to a pipeline). **Opt-in:** set the `GHL_ATTENDEE_WEBHOOK_URL` env var to the UR
 GHL gives you for the Inbound Webhook trigger. One POST is sent **per attendee**.
 
 Tag-based alternative (no setup): a workflow triggered by **Contact Tag Added =
-`🤝 s&p-attendee`** also fires for every new attendee, with all the contact
-fields (buyer name/email, role, event tag) already populated.
+`🤝 s&p-manual-attendee`** also fires for every admin-registered attendee, with
+all the contact fields (buyer name/email, role, event tag) already populated.
 
 Payload (`application/json`):
 

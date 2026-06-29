@@ -19,6 +19,9 @@ const EVENT_TAG_PREFIX = "🤝 s&p-";
 // the buyer is marked a multiple-ticket buyer, each registered guest an attendee.
 const MULTI_TICKET_BUYER_TAG = "🤝 s&p-multipleticket-buyer";
 const ATTENDEE_TAG = "🤝 s&p-attendee";
+// Marks an attendee that the admin registered by hand (vs. any future
+// self-registered attendee), so automations can target admin-added ones.
+const MANUAL_ATTENDEE_TAG = "🤝 s&p-manual-attendee";
 
 // "2026-06-03" → "260603"; "" if the date isn't a full ISO date.
 function yymmdd(isoDate?: string): string {
@@ -991,9 +994,10 @@ export const addAttendeesToGhl = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => addAttendeesSchema.parse(d))
   .handler(async ({ data }) => {
     // The event tag (🤝 s&p-{tier}-{city}-{yymmdd}) — same as the buyer — plus the
-    // attendee tag marking them as someone else's extra ticket holder.
+    // attendee tag marking them as someone else's extra ticket holder, and the
+    // manual-attendee marker (admin-registered by hand).
     const evTag = eventTag(data.tier, data.city, data.endDate);
-    const tags = [evTag, ATTENDEE_TAG];
+    const tags = [evTag, ATTENDEE_TAG, MANUAL_ATTENDEE_TAG];
     const toAdd = data.attendees.filter((a) => a.email);
     const results = await Promise.allSettled(
       toAdd.map((a) =>
@@ -1203,7 +1207,7 @@ export const revokeAttendeeFromBuyer = createServerFn({ method: "POST" })
       try {
         await ghlFetch(`/contacts/${attendeeId}/tags`, {
           method: "DELETE",
-          body: JSON.stringify({ tags: [tag, ATTENDEE_TAG] }),
+          body: JSON.stringify({ tags: [tag, ATTENDEE_TAG, MANUAL_ATTENDEE_TAG] }),
         });
       } catch (err) {
         console.warn("GHL attendee untag failed:", (err as Error).message);
