@@ -94,14 +94,34 @@ const FIELD_KEYS = {
 const OPP_FIELD_KEYS = {
   ticketsPurchased: "sp2026ticket_quantity",
   ticketsPurchasedLegacy: "sp_no_of_ticket_purchased",
-  cohortLocation: "sp_cohort_location",
-  cohortDate: "sp_cohort_date",
-  cohortVenue: "sp_cohort_venue",
-  cohortAddress: "sp_cohort_address",
-  cohortTime: "sp_cohort_time",
-  // Tier purchased → {{opportunity.cpsp_ticket_tier}} ("General Admission" / "VIP").
+  // Event details written to the buyer's opportunity at checkout, merged in
+  // emails as {{opportunity.cpsp_cohort_*}}.
+  cohortLocation: "cpsp_cohort_location",
+  cohortDate: "cpsp_cohort_date",
+  cohortVenue: "cpsp_cohort_venue",
+  cohortAddress: "cpsp_cohort_address",
+  cohortTime: "cpsp_cohort_time",
+  // Dynamic ticket label → {{opportunity.cpsp_ticket_tier}}: "{qty} General
+  // Admission {year}" for GA, or "VIP {year}" (VIP is single-seat).
   ticketTier: "cpsp_ticket_tier",
 } as const;
+
+// Build the dynamic opportunity ticket label, e.g. "3 General Admission 2026" or
+// "VIP 2026" (VIP is single-seat, so no count). Year appended when known.
+function ticketTierLabel(tier: "ga" | "vip", quantity: number, year: string): string {
+  const suffix = year ? ` ${year}` : "";
+  if (tier === "vip") return `VIP${suffix}`;
+  return `${Math.max(quantity, 1)} General Admission${suffix}`;
+}
+
+// First 4-digit 20xx year found among the given strings ("" if none).
+function yearOf(...candidates: Array<string | undefined>): string {
+  for (const c of candidates) {
+    const m = (c ?? "").match(/\b(20\d{2})\b/);
+    if (m) return m[1];
+  }
+  return "";
+}
 
 const GA_PRICE_TIERS = [
   { qty: 1, price: 997 },
@@ -274,7 +294,10 @@ export const submitCheckoutToGhl = createServerFn({ method: "POST" })
           const oppCustomFields: Array<{ key: string; field_value: string }> = [
             { key: OPP_FIELD_KEYS.ticketsPurchased, field_value: String(data.quantity) },
             { key: OPP_FIELD_KEYS.ticketsPurchasedLegacy, field_value: String(data.quantity) },
-            { key: OPP_FIELD_KEYS.ticketTier, field_value: tierLabel },
+            {
+              key: OPP_FIELD_KEYS.ticketTier,
+              field_value: ticketTierLabel(data.tier, data.quantity, yearOf(data.event?.date)),
+            },
           ];
           const cohortPairs: Array<[string, string | undefined]> = [
             [OPP_FIELD_KEYS.cohortLocation, data.event?.name],
@@ -1125,7 +1148,7 @@ export const addAttendeesToGhl = createServerFn({ method: "POST" })
                   customFields: [
                     {
                       key: OPP_FIELD_KEYS.ticketTier,
-                      field_value: data.tier === "vip" ? "VIP" : "General Admission",
+                      field_value: ticketTierLabel(data.tier, 1, yearOf(data.endDate)),
                     },
                   ],
                 }),

@@ -30,16 +30,16 @@ confirm it exists in GHL or the value/merge-tag will be empty.
 
 ## Opportunity custom fields
 
-| Field key                   | Type   | Purpose                     |
-| --------------------------- | ------ | --------------------------- |
-| `sp_no_of_ticket_purchased` | Number | Ticket count on opportunity |
-| `sp2026ticket_quantity`     | Number | Ticket count on opportunity |
-| `sp_cohort_location`        | Text   | Cohort city (email merge)   |
-| `sp_cohort_date`            | Text   | Cohort date                 |
-| `sp_cohort_venue`           | Text   | Cohort venue                |
-| `sp_cohort_address`         | Text   | Cohort address              |
-| `sp_cohort_time`            | Text   | Cohort time                 |
-| `cpsp_ticket_tier` 🆕       | Text   | "General Admission" / "VIP" |
+| Field key                   | Type                             | Purpose                                                   |
+| --------------------------- | -------------------------------- | --------------------------------------------------------- |
+| `sp_no_of_ticket_purchased` | Number                           | Ticket count on opportunity                               |
+| `sp2026ticket_quantity`     | Number                           | Ticket count on opportunity                               |
+| `cpsp_cohort_location` 🆕   | Text                             | Event location/name (email merge)                         |
+| `cpsp_cohort_date` 🆕       | Text                             | Event date                                                |
+| `cpsp_cohort_venue` 🆕      | Text                             | Event venue                                               |
+| `cpsp_cohort_address` 🆕    | Text                             | Event address                                             |
+| `cpsp_cohort_time` 🆕       | Text                             | Event time                                                |
+| `cpsp_ticket_tier` 🆕       | Text (single line, NOT dropdown) | Dynamic: "{qty} General Admission {year}" or "VIP {year}" |
 
 ## Location custom values
 
