@@ -32,8 +32,8 @@ confirm it exists in GHL or the value/merge-tag will be empty.
 
 | Field key                   | Type                             | Purpose                                                   |
 | --------------------------- | -------------------------------- | --------------------------------------------------------- |
-| `sp_no_of_ticket_purchased` | Number                           | Ticket count on opportunity                               |
-| `sp2026ticket_quantity`     | Number                           | Ticket count on opportunity                               |
+| `cpsp_ticket_quantity` 🆕   | Number                           | Ticket count on opportunity (primary)                     |
+| `sp_no_of_ticket_purchased` | Number                           | Ticket count on opportunity (legacy, also written)        |
 | `cpsp_cohort_location` 🆕   | Text                             | Event location/name (email merge)                         |
 | `cpsp_cohort_date` 🆕       | Text                             | Event date                                                |
 | `cpsp_cohort_venue` 🆕      | Text                             | Event venue                                               |

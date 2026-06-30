@@ -92,7 +92,9 @@ const FIELD_KEYS = {
 // fields — referenced as {{opportunity.<key>}}). The cohort fields carry the
 // event details so emails/messaging can merge them from the opportunity.
 const OPP_FIELD_KEYS = {
-  ticketsPurchased: "sp2026ticket_quantity",
+  // Tickets purchased on the buyer's opportunity → {{opportunity.cpsp_ticket_quantity}}.
+  ticketsPurchased: "cpsp_ticket_quantity",
+  // Legacy opportunity ticket-count key, still written + read for back-compat.
   ticketsPurchasedLegacy: "sp_no_of_ticket_purchased",
   // Event details written to the buyer's opportunity at checkout, merged in
   // emails as {{opportunity.cpsp_cohort_*}}.
