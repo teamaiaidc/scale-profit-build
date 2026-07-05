@@ -25,6 +25,10 @@ const MANUAL_ATTENDEE_TAG = "🤝 s&p-manual-attendee";
 // Applied when the admin revokes an attendee's ticket — a visible marker + an
 // automation hook (the event/attendee tags are removed at the same time).
 const REVOKED_TAG = "🤝 s&p-revoked";
+// Name marker for the per-ticket placeholder opportunities created at checkout
+// (one per ticket). Each carries the buyer's info until the admin fills it by
+// reassigning it to an additional attendee.
+const TICKET_PLACEHOLDER_MARKER = "Unassigned Ticket";
 
 // "2026-06-03" → "260603"; "" if the date isn't a full ISO date.
 function yymmdd(isoDate?: string): string {
@@ -284,15 +288,18 @@ export const submitCheckoutToGhl = createServerFn({ method: "POST" })
       );
     }
 
-    // 3. Create an opportunity in the first available pipeline (best-effort)
-    let opportunityId: string | undefined;
+    // 3. Create ONE opportunity per ticket purchased (no. of tickets = no. of
+    // opportunities). All start on the BUYER's contact carrying the buyer's
+    // purchase info; the admin fills each by reassigning it to an additional
+    // attendee. Whatever stays unfilled is the buyer's own seat(s). Best-effort.
+    const opportunityIds: string[] = [];
     if (contactId && pipelines) {
       try {
         const pipeline = pipelines.pipelines?.[0];
         const stageId = pipeline?.stages?.[0]?.id;
         if (pipeline && stageId) {
-          // Opportunity custom fields: ticket count + event/cohort details
-          // (so emails can merge {{opportunity.sp_cohort_*}}).
+          // Shared purchase info written to every ticket opportunity, so each one
+          // carries the buyer's cohort + tier details (merge {{opportunity.*}}).
           const oppCustomFields: Array<{ key: string; field_value: string }> = [
             { key: OPP_FIELD_KEYS.ticketsPurchased, field_value: String(data.quantity) },
             { key: OPP_FIELD_KEYS.ticketsPurchasedLegacy, field_value: String(data.quantity) },
@@ -312,27 +319,48 @@ export const submitCheckoutToGhl = createServerFn({ method: "POST" })
             if (value) oppCustomFields.push({ key, field_value: value });
           }
 
-          const opp = (await ghlFetch("/opportunities/", {
-            method: "POST",
-            body: JSON.stringify({
-              locationId: GHL_LOCATION_ID,
-              pipelineId: pipeline.id,
-              pipelineStageId: stageId,
-              name: `${data.firstName} ${data.lastName} — ${tierLabel} (${data.city})`,
-              status: "open",
-              monetaryValue: data.amount,
-              contactId,
-              customFields: oppCustomFields,
-            }),
-          })) as { opportunity?: { id?: string }; id?: string };
-          opportunityId = (opp.opportunity && opp.opportunity.id) || opp.id || undefined;
+          const buyerName = `${data.firstName} ${data.lastName}`.trim();
+          // Split the order value across the tickets so the pipeline total stays
+          // accurate (not N× the order).
+          const perTicket =
+            data.quantity > 0 ? Math.round(data.amount / data.quantity) : data.amount;
+          for (let k = 1; k <= data.quantity; k++) {
+            // Single-ticket buyers attend their own seat → keep a clean name; a
+            // multi-ticket purchase makes each seat a fillable placeholder.
+            const name =
+              data.quantity === 1
+                ? `${buyerName} — ${tierLabel} (${data.city})`
+                : `${buyerName} — ${TICKET_PLACEHOLDER_MARKER} ${k}/${data.quantity} (${data.city})`;
+            try {
+              const opp = (await ghlFetch("/opportunities/", {
+                method: "POST",
+                body: JSON.stringify({
+                  locationId: GHL_LOCATION_ID,
+                  pipelineId: pipeline.id,
+                  pipelineStageId: stageId,
+                  name,
+                  status: "open",
+                  monetaryValue: perTicket,
+                  contactId,
+                  customFields: oppCustomFields,
+                }),
+              })) as { opportunity?: { id?: string }; id?: string };
+              const id = (opp.opportunity && opp.opportunity.id) || opp.id;
+              if (id) opportunityIds.push(id);
+            } catch (err) {
+              console.warn(
+                `GHL opportunity ${k}/${data.quantity} create skipped:`,
+                (err as Error).message,
+              );
+            }
+          }
         }
       } catch (err) {
         console.warn("GHL opportunity create skipped:", (err as Error).message);
       }
     }
 
-    return { ok: true, contactId, opportunityId, tags };
+    return { ok: true, contactId, opportunityId: opportunityIds[0], opportunityIds, tags };
   });
 
 // ============== 2-way sync helpers ==============
@@ -1113,55 +1141,75 @@ export const addAttendeesToGhl = createServerFn({ method: "POST" })
       }
     }
 
-    // Record the buyer name/email + tier on each attendee's opportunity, so GHL
-    // can merge {{opportunity.cpsp_buyer_name}} / cpsp_buyer_email /
-    // cpsp_ticket_tier (e.g. in attendee emails).
-    // IMPORTANT: create the opportunity in the SAME pipeline + stage as the
-    // BUYER's own opportunity, so attendees land in this event's pipeline — never
-    // an arbitrary first pipeline (which would be a different event). If the buyer
-    // has no opportunity, we skip creation rather than guess a pipeline.
-    if (data.buyerName && data.buyerContactId && saved > 0) {
+    // FILL a reserved ticket opportunity per attendee: reassign one of the
+    // buyer's placeholder opportunities (created at checkout) to this attendee —
+    // moving it onto their contact + renaming it. Preserves the placeholder's
+    // cohort fields. Whatever is left unfilled stays the buyer's own seat(s). If
+    // no placeholder is available (e.g. a manually-added buyer), fall back to
+    // creating a fresh opportunity in the buyer's pipeline.
+    if (data.buyerContactId && saved > 0) {
       try {
         const oppRes = (await ghlFetch(
           `/opportunities/search?location_id=${GHL_LOCATION_ID}&contact_id=${data.buyerContactId}`,
           { method: "GET" },
         )) as {
           opportunities?: Array<{
+            id?: string;
+            name?: string;
             pipelineId?: string;
             pipelineStageId?: string;
             stageId?: string;
           }>;
         };
-        const buyerOpp = oppRes.opportunities?.[0];
-        const pipelineId = buyerOpp?.pipelineId;
-        const pipelineStageId = buyerOpp?.pipelineStageId ?? buyerOpp?.stageId;
-        if (pipelineId && pipelineStageId) {
-          await Promise.allSettled(
-            savedAttendees.map((a) =>
-              ghlFetch("/opportunities/", {
+        const buyerOpps = oppRes.opportunities ?? [];
+        // Unfilled ticket placeholders still sitting on the buyer's contact.
+        const placeholders = buyerOpps.filter((o) =>
+          (o.name ?? "").includes(TICKET_PLACEHOLDER_MARKER),
+        );
+        const anyOpp = buyerOpps[0];
+        const pipelineId = anyOpp?.pipelineId;
+        const fallbackStage = anyOpp?.pipelineStageId ?? anyOpp?.stageId;
+        const year = yearOf(data.endDate);
+        await Promise.allSettled(
+          savedAttendees.map((a, idx) => {
+            const attendeeFields = [
+              { key: OPP_FIELD_KEYS.ticketTier, field_value: ticketTierLabel(data.tier, 1, year) },
+            ];
+            const name = `${a.firstName} ${a.lastName} — Attendee (${data.city})`;
+            const ph = placeholders[idx];
+            if (ph?.id) {
+              // Reassign the placeholder to the attendee (fill it).
+              return ghlFetch(`/opportunities/${ph.id}`, {
+                method: "PUT",
+                body: JSON.stringify({
+                  pipelineId: ph.pipelineId ?? pipelineId,
+                  pipelineStageId: ph.pipelineStageId ?? ph.stageId ?? fallbackStage,
+                  name,
+                  contactId: a.id,
+                  customFields: attendeeFields,
+                }),
+              });
+            }
+            if (pipelineId && fallbackStage) {
+              // No placeholder left → create a fresh opportunity on the attendee.
+              return ghlFetch("/opportunities/", {
                 method: "POST",
                 body: JSON.stringify({
                   locationId: GHL_LOCATION_ID,
                   pipelineId,
-                  pipelineStageId,
-                  name: `${a.firstName} ${a.lastName} — Attendee (${data.city})`,
+                  pipelineStageId: fallbackStage,
+                  name,
                   status: "open",
                   contactId: a.id,
-                  customFields: [
-                    {
-                      key: OPP_FIELD_KEYS.ticketTier,
-                      field_value: ticketTierLabel(data.tier, 1, yearOf(data.endDate)),
-                    },
-                  ],
+                  customFields: attendeeFields,
                 }),
-              }),
-            ),
-          );
-        } else {
-          console.warn("Skipped attendee opportunity create: buyer has no opportunity to mirror.");
-        }
+              });
+            }
+            return Promise.resolve();
+          }),
+        );
       } catch (err) {
-        console.warn("GHL attendee opportunity create failed:", (err as Error).message);
+        console.warn("GHL attendee opportunity fill failed:", (err as Error).message);
       }
     }
 
@@ -1263,6 +1311,35 @@ export const revokeAttendeeFromBuyer = createServerFn({ method: "POST" })
         });
       } catch (err) {
         console.warn("GHL attendee field clear failed:", (err as Error).message);
+      }
+      // Un-fill: hand the attendee's ticket opportunity back to the buyer as an
+      // unassigned placeholder, so the freed seat can be reassigned.
+      try {
+        const oppRes = (await ghlFetch(
+          `/opportunities/search?location_id=${GHL_LOCATION_ID}&contact_id=${attendeeId}`,
+          { method: "GET" },
+        )) as {
+          opportunities?: Array<{
+            id?: string;
+            pipelineId?: string;
+            pipelineStageId?: string;
+            stageId?: string;
+          }>;
+        };
+        const opp = oppRes.opportunities?.[0];
+        if (opp?.id) {
+          await ghlFetch(`/opportunities/${opp.id}`, {
+            method: "PUT",
+            body: JSON.stringify({
+              pipelineId: opp.pipelineId,
+              pipelineStageId: opp.pipelineStageId ?? opp.stageId,
+              name: `${TICKET_PLACEHOLDER_MARKER} (${data.city})`,
+              contactId: data.buyerContactId,
+            }),
+          });
+        }
+      } catch (err) {
+        console.warn("GHL revoke opportunity un-fill failed:", (err as Error).message);
       }
     }
     // 2. Drop the attendee from the buyer's list + decrement the count.

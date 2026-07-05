@@ -59,6 +59,25 @@ confirm it exists in GHL or the value/merge-tag will be empty.
 | `🤝 s&p-manual-attendee`                                            | An attendee the admin registered by hand (automation target) |
 | `🤝 s&p-revoked`                                                    | Attendee whose ticket the admin revoked (event tags removed) |
 
+## Opportunities: one per ticket (reserve + fill)
+
+On checkout the app creates **one opportunity per ticket purchased** (no. of
+tickets = no. of opportunities), all on the **buyer's** contact:
+
+- Single ticket → one opportunity named `Buyer — {tier} (city)`.
+- Multi-ticket → N opportunities named `Buyer — Unassigned Ticket k/N (city)`,
+  each carrying the buyer's purchase info (cohort fields, tier, count). The order
+  value is split evenly across them so the pipeline total isn't N×.
+
+When the admin registers an additional attendee, one **Unassigned Ticket**
+placeholder is **reassigned** to that attendee (moved onto their contact + renamed
+`Attendee — …`). Whatever stays unfilled is the buyer's own seat(s). Revoking an
+attendee hands their opportunity back to the buyer as an Unassigned Ticket.
+
+> Reassigning an opportunity's contact depends on GHL allowing it via the API. If
+> it doesn't, the opportunity stays on the buyer with the attendee's name/fields
+> updated instead (still one opportunity per ticket). Verify after a test fill.
+
 ## Attendee-registered webhook (pipeline automation)
 
 When the admin registers an additional attendee, the app can POST to a GHL
